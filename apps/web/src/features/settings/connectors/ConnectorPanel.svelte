@@ -37,6 +37,7 @@
   } from "@/data/connectors/types";
   import { formatDateTime } from "@/shared/format/financial";
   import { browserCaptchaFailure } from "./browser-captcha";
+  import { shouldEnableScheduleAfterFirstSync } from "./schedule-after-sync";
 
   let {
     api,
@@ -213,6 +214,9 @@
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.syncJobs }),
   });
   const sync = createMutation({
+    onMutate: () => ({
+      enableSchedule: shouldEnableScheduleAfterFirstSync(connectorId, job),
+    }),
     mutationFn: async (target: SyncTarget) => {
       if (demoMode) throw new Error("Demo site 已停用連接器同步。");
       const path =
@@ -237,7 +241,7 @@
         throw errorValue;
       }
     },
-    onSuccess: () => {
+    onSuccess: (_data, _target, context) => {
       error = "";
       if (connectorId === "cathaybk") {
         resetCathayVerification();
@@ -260,7 +264,7 @@
       invalidateLatestSyncReport();
       qc.invalidateQueries({ queryKey: queryKeys.syncJobs });
       qc.invalidateQueries({ queryKey: queryKeys.summary });
-      enableScheduleAfterSuccessfulSync();
+      enableScheduleAfterSuccessfulSync(context.enableSchedule);
       if (
         connectorId === "esun" ||
         connectorId === "cathaybk" ||
@@ -345,6 +349,9 @@
     onError: (e) => (error = e instanceof Error ? e.message : "取得驗證碼失敗"),
   });
   const verifyBrowserBank = createMutation({
+    onMutate: () => ({
+      enableSchedule: shouldEnableScheduleAfterFirstSync(connectorId, job),
+    }),
     mutationFn: () => {
       if (demoMode) throw new Error("Demo site 已停用連接器同步。");
       const pattern =
@@ -359,7 +366,7 @@
         captcha: bankCaptcha.trim(),
       });
     },
-    onSuccess: () => {
+    onSuccess: (_data, _variables, context) => {
       error = "";
       bankCaptcha = "";
       bankCaptchaImage = "";
@@ -371,7 +378,7 @@
       invalidateLatestSyncReport();
       qc.invalidateQueries({ queryKey: queryKeys.bank });
       qc.invalidateQueries({ queryKey: queryKeys.bills });
-      enableScheduleAfterSuccessfulSync();
+      enableScheduleAfterSuccessfulSync(context.enableSchedule);
     },
     onError: (e) => {
       const failure = browserCaptchaFailure(e);
@@ -550,14 +557,8 @@
     $sync.mutate("default");
   }
 
-  function enableScheduleAfterSuccessfulSync() {
-    if (
-      (connectorId === "sinopac" ||
-        connectorId === "taishin" ||
-        connectorId === "obank") &&
-      job &&
-      !job.enabled
-    ) {
+  function enableScheduleAfterSuccessfulSync(eligible: boolean) {
+    if (eligible && job && !job.enabled) {
       $updateJob.mutate({ enabled: true });
     }
   }
