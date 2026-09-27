@@ -554,8 +554,7 @@
     if (
       (connectorId === "sinopac" ||
         connectorId === "taishin" ||
-        connectorId === "obank" ||
-        connectorId === "megabank") &&
+        connectorId === "obank") &&
       job &&
       !job.enabled
     ) {

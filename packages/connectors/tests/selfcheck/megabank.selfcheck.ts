@@ -14,6 +14,7 @@ import {
 import {
   createMegabankConnector,
   encryptLogin,
+  MegabankProtocolError,
   MegabankVerificationRequiredError,
   prepareMegabankCaptcha,
 } from "../../src/megabank-mobile-api";
@@ -118,7 +119,15 @@ const payloads: MegabankPayloads = {
           lastpayDate: "2026/10/15",
         },
       ],
-      ridoRecordList: [],
+      ridoRecordList: [
+        {
+          acctMon: "999912",
+          currCode: "TWD",
+          thisTtlAmt: "300",
+          minPay: "0",
+          thisPayAmt: "0",
+        },
+      ],
     },
   },
   cardHome: { rsData: { cardNumbers: [{ cardNo, cardName: "測試卡" }] } },
@@ -195,6 +204,7 @@ assert.deepEqual(
   parsedAgain.bankTransactions.map((row) => row.sourceId),
 );
 assert.equal(parsed.creditCardBills[0]?.statementAmount, 1200);
+assert.equal(parsed.creditCardBills.length, 1);
 assert.equal(parsed.creditCardBills[0]?.minimumPayment, 120);
 assert.equal(parsed.creditCardBills[0]?.paidAmount, 200);
 assert.equal(parsed.creditCardBills[0]?.paymentDueDate, "2026-10-15");
@@ -236,7 +246,10 @@ const cipherToken = {
 const encrypted = encryptLogin(credentials, cipherToken);
 const plaintext = privateDecrypt(
   { key: privateKey, padding: constants.RSA_PKCS1_PADDING },
-  Buffer.from(encrypted, "hex"),
+  Buffer.from(
+    encrypted.padStart(Buffer.from(jwk.n, "base64url").length * 2, "0"),
+    "hex",
+  ),
 );
 const prefix = Buffer.from(`${credentials.userId}|${credentials.account}/`);
 assert.deepEqual(plaintext.subarray(0, prefix.length), prefix);
@@ -252,6 +265,7 @@ assert.deepEqual(plaintext.subarray(prefix.length), expected);
 
 let oauthCalls = 0;
 let loginCode = "0000";
+let malformedResource: string | null = null;
 const requests: string[] = [];
 const fetcher = async (
   input: RequestInfo | URL,
@@ -291,13 +305,25 @@ const fetcher = async (
     } else if (request.resource === "/fco/fco10001/home") {
       response = { code: "0000", ...(payloads.deposits as object) };
     } else if (request.resource === "/fco/fco10007/home") {
-      response = { code: "0000", ...(payloads.cardOverview as object) };
+      response =
+        malformedResource === request.resource
+          ? { code: "0000", rsData: {} }
+          : { code: "0000", ...(payloads.cardOverview as object) };
     } else if (request.resource === "/fao/fao01009/home") {
-      response = { code: "0000", ...(payloads.cardBills as object) };
+      response =
+        malformedResource === request.resource
+          ? { code: "0000", rsData: { returnCode: "1120" } }
+          : { code: "0000", ...(payloads.cardBills as object) };
     } else if (request.resource === "/fao/fao01010/home") {
-      response = { code: "0000", ...(payloads.cardHome as object) };
+      response =
+        malformedResource === request.resource
+          ? { code: "0000", rsData: {} }
+          : { code: "0000", ...(payloads.cardHome as object) };
     } else if (request.resource === "/fao/fao01010/query") {
-      response = { code: "0000", ...(payloads.cardTransactions as object) };
+      response =
+        malformedResource === request.resource
+          ? { code: "0000", rsData: {} }
+          : { code: "0000", ...(payloads.cardTransactions as object) };
     } else if (request.resource === "/fao/fao01001/query") {
       response = {
         code: "0000",
@@ -331,6 +357,24 @@ assert.equal(result.creditCardBills?.length, 1);
 assert.ok(requests.includes("/fao/fao01010/query"));
 assert.ok(requests.includes("/fao/fao01001/query"));
 assert.equal(JSON.stringify(result.cursor).includes("token"), false);
+for (const resource of [
+  "/fco/fco10007/home",
+  "/fao/fao01009/home",
+  "/fao/fao01010/home",
+  "/fao/fao01010/query",
+]) {
+  malformedResource = resource;
+  await assert.rejects(
+    connector.sync({
+      ...credentials,
+      pendingSession: challenge.pendingSession,
+      pendingSessionExpiresAt: challenge.pendingSessionExpiresAt,
+      captcha: "12345",
+    }),
+    MegabankProtocolError,
+  );
+}
+malformedResource = null;
 loginCode = "0113";
 await assert.rejects(
   connector.sync({

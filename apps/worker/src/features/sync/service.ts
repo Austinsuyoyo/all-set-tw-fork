@@ -115,6 +115,7 @@ import {
   reconcileHncbSingleCardSummaryAccountStatements,
   reconcileSinopacLegacyTransactionStatements,
   updateConnectorEncryptedConfig,
+  updateConnectorEncryptedConfigIfCurrent,
 } from "./repository";
 import {
   bankAccountRecord,
@@ -470,9 +471,10 @@ export async function prepareMegabankCaptchaSession(env: Env) {
       ...parsePublicConnectorConfig(connectorId, settings.public_config),
     });
     const prepared = await prepareMegabankCaptcha(config);
-    await updateConnectorEncryptedConfig(
+    const saved = await updateConnectorEncryptedConfigIfCurrent(
       env.DB,
       connectorId,
+      settings.encrypted_config,
       await encryptJson(
         {
           ...stored,
@@ -482,6 +484,11 @@ export async function prepareMegabankCaptchaSession(env: Env) {
         configEncryptionKey(env),
       ),
     );
+    if (!saved) {
+      throw new NeedsUserActionError(
+        "兆豐銀行設定在驗證期間已變更，請重新取得驗證碼。",
+      );
+    }
     return {
       captchaImage: prepared.captchaImage,
       expiresAt: prepared.pendingSessionExpiresAt,
@@ -1408,9 +1415,10 @@ export async function syncMegabank(
     result = await connector.sync(config, settings.sync_cursor ?? undefined);
   } catch (error) {
     const cleaned = obankStoredConfigAfterSync(stored);
-    await updateConnectorEncryptedConfig(
+    await updateConnectorEncryptedConfigIfCurrent(
       env.DB,
       connectorId,
+      settings.encrypted_config,
       await encryptJson(cleaned, configEncryptionKey(env)),
     );
     if (error instanceof MegabankVerificationRequiredError) {
@@ -1440,19 +1448,34 @@ export async function syncMegabank(
     ),
   ];
   const cleanedConfig = parseMegabankConfig(obankStoredConfigAfterSync(config));
+  if (
+    (await requireConnectorSettings(env.DB, connectorId)).encrypted_config !==
+    settings.encrypted_config
+  ) {
+    throw new NeedsUserActionError(
+      "兆豐銀行設定在同步期間已變更，請重新同步。",
+    );
+  }
   let persistedCursor: string | undefined;
+  let persistedEncryptedConfig: string | undefined;
   const finalizeStatements: D1PreparedStatement[] = [];
   if (result.cursor) {
     const cursorState = splitConnectorCursorState(connectorId, result.cursor);
     persistedCursor = cursorState.safeCursor;
+    persistedEncryptedConfig = await encryptConnectorConfig(
+      env,
+      connectorId,
+      cleanedConfig,
+    );
     finalizeStatements.push(
       connectorStateStatement(
         env.DB,
         connectorId,
-        await encryptConnectorConfig(env, connectorId, cleanedConfig),
+        persistedEncryptedConfig,
         serializePublicConfig(connectorId, cleanedConfig),
         persistedCursor,
         now,
+        settings.encrypted_config,
       ),
     );
   }
@@ -1464,6 +1487,15 @@ export async function syncMegabank(
         : [],
     finalizeStatements,
   });
+  if (
+    persistedEncryptedConfig &&
+    (await requireConnectorSettings(env.DB, connectorId)).encrypted_config !==
+      persistedEncryptedConfig
+  ) {
+    throw new NeedsUserActionError(
+      "兆豐銀行設定在同步期間已變更，請重新同步。",
+    );
+  }
   if (
     bankBalanceSnapshots.some((snapshot) =>
       bankAccounts.some(

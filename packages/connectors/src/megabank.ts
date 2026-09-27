@@ -172,6 +172,7 @@ export function parseMegabankData(
     }
   >();
   for (const row of billRows) {
+    if (stringAt(row, "acctMon") === "999912") continue;
     const currency = currencyAt(row.currCode);
     const period = periodAt(row.acctMon);
     const amount = numberAt(row.thisTtlAmt);

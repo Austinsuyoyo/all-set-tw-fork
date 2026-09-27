@@ -39,12 +39,12 @@
     const latestBill = institutionBills.find(
       (bill) => bill.accountId === card.id,
     );
-    const dueDate = card.paymentDueDate ?? latestBill?.paymentDueDate;
     if (latestBill?.isPaid === 1) {
-      return dueDate
-        ? `最近帳單已繳 · 期限 ${formatDate(dueDate)}`
+      return latestBill.paymentDueDate
+        ? `最近帳單已繳 · 期限 ${formatDate(latestBill.paymentDueDate)}`
         : "最近帳單已繳";
     }
+    const dueDate = card.paymentDueDate ?? latestBill?.paymentDueDate;
     if (dueDate) return `繳款期限 ${formatDate(dueDate)}`;
     return card.balance == null ? "繳款期限待同步" : "繳款期限尚未提供";
   }

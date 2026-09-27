@@ -22,6 +22,23 @@ export async function updateConnectorEncryptedConfig(
     });
 }
 
+export async function updateConnectorEncryptedConfigIfCurrent(
+  db: D1Database,
+  connectorId: ConnectorId,
+  expectedEncryptedConfig: string,
+  encryptedConfig: string,
+) {
+  const result = await db
+    .prepare(
+      `UPDATE connector_settings
+       SET encrypted_config = ?
+       WHERE connector_id = ? AND encrypted_config = ?`,
+    )
+    .bind(encryptedConfig, connectorId, expectedEncryptedConfig)
+    .run();
+  return result.meta.changes === 1;
+}
+
 // 以下 statement factories 保留原生 D1：service 將設定、cursor 與 lifecycle
 // reconciliation 併入 persistence 的單一 promotion batch，不可各自 await。
 export function connectorEncryptedConfigStatement(
@@ -47,14 +64,24 @@ export function connectorStateStatement(
   publicConfig: string | null,
   cursor: string,
   now: string,
+  expectedEncryptedConfig?: string,
 ) {
   return db
     .prepare(
       `UPDATE connector_settings
     SET encrypted_config = ?, public_config = ?, sync_cursor = ?, updated_at = ?
-    WHERE connector_id = ?`,
+    WHERE connector_id = ?${expectedEncryptedConfig === undefined ? "" : " AND encrypted_config = ?"}`,
     )
-    .bind(encryptedConfig, publicConfig, cursor, now, connectorId);
+    .bind(
+      encryptedConfig,
+      publicConfig,
+      cursor,
+      now,
+      connectorId,
+      ...(expectedEncryptedConfig === undefined
+        ? []
+        : [expectedEncryptedConfig]),
+    );
 }
 
 export function connectorCursorStatement(

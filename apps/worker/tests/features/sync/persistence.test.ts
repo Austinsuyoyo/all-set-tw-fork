@@ -22,12 +22,14 @@ import {
   type SyncWriteRecord,
 } from "../../../src/features/sync/persistence";
 import {
+  connectorStateStatement,
   linkCanonicalBankAccountsStatement,
   reconcileEsunLifecycleShadowStatements,
   reconcileEsunSingleCardSummaryAccountStatements,
   reconcileHncbLegacyTransactionStatements,
   reconcileHncbSingleCardSummaryAccountStatements,
   reconcileSinopacLegacyTransactionStatements,
+  updateConnectorEncryptedConfigIfCurrent,
 } from "../../../src/features/sync/repository";
 
 /** This Node sqlite bind API only accepts anonymous `?`; expand D1 `?1` placeholders. */
@@ -245,6 +247,76 @@ function creditCardBillRecord(
 }
 
 describe("staged sync persistence", () => {
+  it("does not restore old Mega Bank credentials or cursor after a settings change", async () => {
+    const db = createDb();
+    db.database
+      .prepare(
+        `INSERT INTO connector_settings
+         (id, connector_id, encrypted_config, sync_cursor, created_at, updated_at)
+         VALUES ('megabank-settings', 'megabank', 'old-config', 'old-cursor', '2026-09-27', '2026-09-27')`,
+      )
+      .run();
+    const d1 = db as unknown as D1Database;
+    expect(
+      await updateConnectorEncryptedConfigIfCurrent(
+        d1,
+        "megabank",
+        "old-config",
+        "old-pending-session",
+      ),
+    ).toBe(true);
+
+    db.database
+      .prepare(
+        `UPDATE connector_settings
+         SET encrypted_config = 'new-config', sync_cursor = NULL
+         WHERE connector_id = 'megabank'`,
+      )
+      .run();
+    expect(
+      await updateConnectorEncryptedConfigIfCurrent(
+        d1,
+        "megabank",
+        "old-pending-session",
+        "old-cleaned-config",
+      ),
+    ).toBe(false);
+    expect(
+      (
+        await connectorStateStatement(
+          d1,
+          "megabank",
+          "old-cleaned-config",
+          null,
+          "old-synced-cursor",
+          "2026-09-28",
+          "old-pending-session",
+        ).run()
+      ).meta.changes,
+    ).toBe(0);
+    expect(
+      db.database
+        .prepare(
+          `SELECT encrypted_config, sync_cursor FROM connector_settings
+           WHERE connector_id = 'megabank'`,
+        )
+        .get(),
+    ).toEqual({ encrypted_config: "new-config", sync_cursor: null });
+    expect(
+      (
+        await connectorStateStatement(
+          d1,
+          "megabank",
+          "new-cleaned-config",
+          null,
+          "new-synced-cursor",
+          "2026-09-28",
+          "new-config",
+        ).run()
+      ).meta.changes,
+    ).toBe(1);
+  });
+
   it("seeds a disabled CTBC all-scope sync job", () => {
     const db = createDb();
 

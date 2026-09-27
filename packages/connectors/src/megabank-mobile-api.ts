@@ -176,6 +176,11 @@ export function createMegabankConnector(
         "fco10007",
         "home",
       );
+      if (!Array.isArray(dataAt(cardOverview).creditCardBillInfoList)) {
+        throw new MegabankProtocolError(
+          "兆豐信用卡總覽格式已變更，未更新資料。",
+        );
+      }
       const cardBills = await session.resource(
         "megapmb",
         "/fao/fao01009/home",
@@ -185,7 +190,6 @@ export function createMegabankConnector(
       );
       const billData = dataAt(cardBills);
       if (
-        billData.returnCode === "1000" &&
         !["generalRecordList", "fancyRecordList", "ridoRecordList"].some(
           (key) => Array.isArray(billData[key]),
         )
@@ -201,6 +205,11 @@ export function createMegabankConnector(
         "fao01010",
         "home",
       );
+      if (!Array.isArray(dataAt(cardHome).cardNumbers)) {
+        throw new MegabankProtocolError(
+          "兆豐信用卡清單格式已變更，未更新資料。",
+        );
+      }
       const start = new Date();
       start.setMonth(start.getMonth() - BANK_SYNC_MONTHS);
       const startDate = localDate(start);
@@ -217,10 +226,7 @@ export function createMegabankConnector(
             )
           : { rsData: { detailList: [] } };
       const cardTransactionData = dataAt(cardTransactions);
-      if (
-        cardTransactionData.returnCode === "1000" &&
-        !Array.isArray(cardTransactionData.detailList)
-      ) {
+      if (!Array.isArray(cardTransactionData.detailList)) {
         throw new MegabankProtocolError(
           "兆豐信用卡消費明細格式已變更，未更新資料。",
         );
@@ -611,7 +617,7 @@ export function encryptLogin(
   try {
     return forge.util
       .bytesToHex(publicKey.encrypt(plain, "RSAES-PKCS1-V1_5"))
-      .replace(/^00+/, "");
+      .replace(/^0+/, "");
   } catch {
     throw new MegabankProtocolError("兆豐銀行登入加密失敗。");
   }
