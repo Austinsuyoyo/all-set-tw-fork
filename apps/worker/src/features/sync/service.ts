@@ -1456,6 +1456,10 @@ export async function syncMegabank(
       "兆豐銀行設定在同步期間已變更，請重新同步。",
     );
   }
+  const settingsGuard = {
+    connectorId,
+    encryptedConfig: settings.encrypted_config,
+  } as const;
   let persistedCursor: string | undefined;
   let persistedEncryptedConfig: string | undefined;
   const finalizeStatements: D1PreparedStatement[] = [];
@@ -1481,9 +1485,10 @@ export async function syncMegabank(
   }
   const newRecords = await persistStagedSyncWrite(env.DB, {
     records,
+    settingsGuard,
     afterPromoteStatements:
       bankAccounts.length > 0
-        ? [linkCanonicalBankAccountsStatement(env.DB)]
+        ? [linkCanonicalBankAccountsStatement(env.DB, settingsGuard)]
         : [],
     finalizeStatements,
   });

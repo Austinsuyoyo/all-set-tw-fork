@@ -289,10 +289,20 @@ const DIRECT_DEPOSIT_CONNECTOR_IDS = [
   "megabank",
 ] as const satisfies readonly ConnectorId[];
 
-export function linkCanonicalBankAccountsStatement(db: D1Database) {
+export function linkCanonicalBankAccountsStatement(
+  db: D1Database,
+  settingsGuard?: { connectorId: ConnectorId; encryptedConfig: string },
+) {
   const directConnectorPlaceholders = DIRECT_DEPOSIT_CONNECTOR_IDS.map(
     (_, index) => `?${index + 1}`,
   ).join(", ");
+  const settingsGuardSql = settingsGuard
+    ? ` AND EXISTS (
+        SELECT 1 FROM connector_settings
+        WHERE connector_id = ?${DIRECT_DEPOSIT_CONNECTOR_IDS.length + 1}
+          AND encrypted_config = ?${DIRECT_DEPOSIT_CONNECTOR_IDS.length + 2}
+      )`
+    : "";
   return db
     .prepare(
       `UPDATE bank_accounts
@@ -307,7 +317,12 @@ export function linkCanonicalBankAccountsStatement(db: D1Database) {
     )
     WHERE connector_id NOT IN (${directConnectorPlaceholders})
       AND bank_code IS NOT NULL
-      AND account_last4 IS NOT NULL`,
+      AND account_last4 IS NOT NULL${settingsGuardSql}`,
     )
-    .bind(...DIRECT_DEPOSIT_CONNECTOR_IDS);
+    .bind(
+      ...DIRECT_DEPOSIT_CONNECTOR_IDS,
+      ...(settingsGuard
+        ? [settingsGuard.connectorId, settingsGuard.encryptedConfig]
+        : []),
+    );
 }
