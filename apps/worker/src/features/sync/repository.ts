@@ -250,20 +250,37 @@ export function reconcileHncbLegacyTransactionStatements(db: D1Database) {
   );
 }
 
+const DIRECT_DEPOSIT_CONNECTOR_IDS = [
+  "esun",
+  "cathaybk",
+  "ctbc",
+  "skbank",
+  "obank",
+  "hncb",
+  "firstbank",
+  "kgibank",
+  "megabank",
+] as const satisfies readonly ConnectorId[];
+
 export function linkCanonicalBankAccountsStatement(db: D1Database) {
-  return db.prepare(
-    `UPDATE bank_accounts
+  const directConnectorPlaceholders = DIRECT_DEPOSIT_CONNECTOR_IDS.map(
+    (_, index) => `?${index + 1}`,
+  ).join(", ");
+  return db
+    .prepare(
+      `UPDATE bank_accounts
     SET canonical_account_id = (
       SELECT direct.id FROM bank_accounts direct
-      WHERE direct.connector_id IN ('esun', 'cathaybk', 'ctbc', 'skbank', 'obank', 'hncb', 'firstbank', 'kgibank')
+      WHERE direct.connector_id IN (${directConnectorPlaceholders})
         AND direct.bank_code = bank_accounts.bank_code
         AND direct.account_last4 = bank_accounts.account_last4
         AND direct.currency = bank_accounts.currency
       ORDER BY direct.connector_id
       LIMIT 1
     )
-    WHERE connector_id NOT IN ('esun', 'cathaybk', 'ctbc', 'skbank', 'obank', 'hncb', 'firstbank', 'kgibank')
+    WHERE connector_id NOT IN (${directConnectorPlaceholders})
       AND bank_code IS NOT NULL
       AND account_last4 IS NOT NULL`,
-  );
+    )
+    .bind(...DIRECT_DEPOSIT_CONNECTOR_IDS);
 }

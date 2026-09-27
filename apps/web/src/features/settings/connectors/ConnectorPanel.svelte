@@ -99,7 +99,8 @@
       connectorId === "obank" ||
       connectorId === "firstbank" ||
       connectorId === "hncb" ||
-      connectorId === "kgibank",
+      connectorId === "kgibank" ||
+      connectorId === "megabank",
   );
   const browserBankSessionAvailable = $derived(
     browserBank && Boolean($settings.data?.sessionAvailable),
@@ -553,7 +554,8 @@
     if (
       (connectorId === "sinopac" ||
         connectorId === "taishin" ||
-        connectorId === "obank") &&
+        connectorId === "obank" ||
+        connectorId === "megabank") &&
       job &&
       !job.enabled
     ) {
@@ -871,7 +873,9 @@
               ? "第一銀行"
               : connectorId === "kgibank"
                 ? "凱基"
-                : "永豐"}
+                : connectorId === "megabank"
+                  ? "兆豐"
+                  : "永豐"}
       bind:captcha={bankCaptcha}
       captchaImage={bankCaptchaImage}
       digitCount={bankCaptchaDigitCount}
@@ -1367,6 +1371,8 @@
               ? "排程同步不會在背景寄送驗證碼；登入失效時會標記為需要重新驗證。"
               : connectorId === "cathaybk"
                 ? "首次驗證會加入信任裝置；信任失效時需在手動同步中重新取得驗證碼。"
-                : "輸入完帳號密碼後，請先按「儲存設定」，再按「同步」。"}
+                : connectorId === "megabank"
+                  ? "兆豐同步直接使用 App API，以一般帳密登入並辨識五位數圖形驗證碼；也可改用人工輸入。"
+                  : "輸入完帳號密碼後，請先按「儲存設定」，再按「同步」。"}
   </p>
 </Card>

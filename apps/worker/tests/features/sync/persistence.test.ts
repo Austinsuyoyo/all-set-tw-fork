@@ -374,6 +374,35 @@ describe("staged sync persistence", () => {
     ).toEqual({ canonicalAccountId: "skbank-direct" });
   });
 
+  it("links TDCC bank 017 records to the direct Mega Bank account", async () => {
+    const db = createDb();
+    db.database.exec(`
+      INSERT INTO bank_accounts
+        (id, connector_id, source_id, institution_name, account_name, account_type,
+         currency, bank_code, account_last4, raw_payload, created_at, updated_at)
+      VALUES
+        ('megabank-direct', 'megabank', 'bank:megabank:2345:hash:TWD', '兆豐銀行',
+         '末四碼 2345', 'savings', 'TWD', '017', '2345', '{}', '2026-09-25', '2026-09-25'),
+        ('tdcc-settlement', 'tdcc', 'settlement:017:0000000000012345', '兆豐銀行',
+         '交割帳戶', 'settlement_cash', 'TWD', '017', '2345', '{}', '2026-09-25', '2026-09-25');
+    `);
+
+    await db.batch([
+      linkCanonicalBankAccountsStatement(
+        db as unknown as D1Database,
+      ) as unknown as D1PreparedStatement,
+    ]);
+
+    expect(
+      db.database
+        .prepare(
+          `SELECT canonical_account_id AS canonicalAccountId
+           FROM bank_accounts WHERE id = 'tdcc-settlement'`,
+        )
+        .get(),
+    ).toEqual({ canonicalAccountId: "megabank-direct" });
+  });
+
   it("preserves E.SUN lifecycle shadows when multiple old rows match one transaction", async () => {
     const db = createDb();
     db.database.exec(`
