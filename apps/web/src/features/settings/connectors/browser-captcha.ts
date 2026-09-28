@@ -24,3 +24,17 @@ export function browserCaptchaFailure(error: unknown) {
     sessionInvalidated,
   };
 }
+
+export function needsNextbankCaptcha(connectorId: string, error: unknown) {
+  return (
+    connectorId === "nextbank" &&
+    error instanceof ApiRequestError &&
+    error.code === "USER_ACTION_REQUIRED" &&
+    isNextbankCaptchaMessage(error.message)
+  );
+}
+export function isNextbankCaptchaMessage(message: string) {
+  return /將來銀行需要重新驗證：captcha(?:。|$)|將來銀行驗證碼無法自動辨識/.test(
+    message,
+  );
+}
