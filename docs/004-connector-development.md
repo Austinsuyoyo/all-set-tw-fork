@@ -345,6 +345,8 @@ Migration `0043_merge_legacy_invoice_duplicates.sql` 以相同發票號碼整併
 
 - 使用 App 2.5.19 的 MobileFirst API：OAuth client credentials、`/main/init`、App 初始化、五位數字驗證碼、E2EE RSA／TripleDES 帳密登入。一般登入不要求快速登入或裝置綁定。本機已完成一次實際同步；Cloudflare Workers 線上執行仍需驗證。
 - 人工驗證碼的待登入 session 只保存於 `encrypted_config`，兩分鐘到期，成功或失敗後清除；排程同步使用 Workers AI 辨識。`sync_cursor` 只含同步時間。
+- 登入後無論同步成功或失敗，都依 App 流程呼叫 `/fco/fco02011/logout` 釋放銀行工作階段；登出失敗不覆蓋同步結果或原始錯誤。
+- 本機曾觀察到網銀登入期間同步回 `SYS014`，登出網銀後同步成功；這支持工作階段衝突的推論，但尚無 `SYS014` 的官方定義。此代碼會提示先登出網銀再試，連接器不自動接管其他登入。
 - 驗證碼準備及同步後的設定寫入會比對當初讀取的加密設定；promotion batch 也先檢查同一版本，期間若憑證已更新，不寫入舊帳務、舊憑證或同步游標。
 - 兆豐同步工作建立時停用；首次成功同步後會比照永豐、台新與王道自動啟用。若使用者之後手動停用，再次手動同步不會重新啟用。
 - 存款清單取 `/fco/fco10001/home`；臺幣交易按帳戶查 `/fao/fao01001/query`，最多回溯三個月並處理 `tsqName` 分頁。外幣帳戶與餘額仍會同步，外幣交易查詢尚未完成協定驗證。
