@@ -9,6 +9,7 @@ const puppeteerMock = vi.hoisted(() => ({
 
 vi.mock("@cloudflare/puppeteer", () => ({ default: puppeteerMock }));
 
+import { BrowserRunCapacityError } from "../../src/connectors/browser";
 import {
   createFirstbankConnector,
   FIRSTBANK_SESSION_OCCUPIED_MESSAGE,
@@ -774,6 +775,15 @@ afterEach(() => {
 });
 
 describe("第一銀行 browser session lifecycle", () => {
+  it("preserves a shared Browser Run launch error through connector normalization", async () => {
+    puppeteerMock.launch.mockRejectedValueOnce(
+      new Error("Unable to create new browser: code: 429"),
+    );
+    await expect(
+      createFirstbankConnector({} as Fetcher).sync(credentials),
+    ).rejects.toBeInstanceOf(BrowserRunCapacityError);
+  });
+
   it("captures CAPTCHA, stores session id, and disconnects the pending browser", async () => {
     const page = makePage();
     const browser = makeBrowser(page);

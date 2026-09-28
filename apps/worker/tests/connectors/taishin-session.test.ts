@@ -9,10 +9,10 @@ const puppeteerMock = vi.hoisted(() => ({
 
 vi.mock("@cloudflare/puppeteer", () => ({ default: puppeteerMock }));
 
+import { BrowserRunCapacityError } from "../../src/connectors/browser";
 import {
   createTaishinConnector,
   prepareTaishinCaptcha,
-  TaishinBrowserCapacityError,
   TaishinCaptchaRejectedError,
   TaishinConnectionError,
   TaishinCredentialRejectedError,
@@ -143,6 +143,15 @@ beforeEach(() => {
 });
 
 describe("Taishin browser session lifecycle", () => {
+  it("preserves a shared Browser Run launch error through stage normalization", async () => {
+    puppeteerMock.launch.mockRejectedValueOnce(
+      new Error("Unable to create new browser: code: 429"),
+    );
+    await expect(
+      createTaishinConnector({} as Fetcher).sync(credentials),
+    ).rejects.toBeInstanceOf(BrowserRunCapacityError);
+  });
+
   it("labels an empty browser acquisition error", async () => {
     puppeteerMock.launch.mockRejectedValueOnce(new Error(""));
 
@@ -1169,7 +1178,7 @@ describe("Taishin browser session lifecycle", () => {
 
     await expect(
       prepareTaishinCaptcha({} as Fetcher, credentials),
-    ).rejects.toBeInstanceOf(TaishinBrowserCapacityError);
+    ).rejects.toBeInstanceOf(BrowserRunCapacityError);
     expect(puppeteerMock.launch).not.toHaveBeenCalled();
   });
 });
