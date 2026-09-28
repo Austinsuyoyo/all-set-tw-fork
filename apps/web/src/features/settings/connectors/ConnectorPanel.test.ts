@@ -220,12 +220,12 @@ describe("ConnectorPanel", () => {
     const { api, findByText, getByRole } = renderFirstbankPanel();
 
     expect(await findByText("自動同步：開")).toBeInTheDocument();
-    expect(await findByText("最近同步結果：失敗")).toBeInTheDocument();
+    expect(await findByText("狀態：失敗")).toBeInTheDocument();
     expect(
-      await findByText(/最近失敗原因：第一銀行登入資料驗證失敗/),
+      await findByText(/上次同步：第一銀行登入資料驗證失敗/),
     ).toBeInTheDocument();
-    expect(getByRole("button", { name: "同步帳戶" })).toBeEnabled();
-    expect(getByRole("button", { name: "改用手動驗證" })).toBeEnabled();
+    expect(getByRole("button", { name: "自動驗證並同步" })).toBeEnabled();
+    expect(getByRole("button", { name: "人工輸入驗證碼" })).toBeEnabled();
     expect(api.post).not.toHaveBeenCalled();
     expect(api.patch).not.toHaveBeenCalled();
   });
@@ -522,7 +522,7 @@ describe("ConnectorPanel", () => {
 
 describe("bank verification feedback", () => {
   it("shows pending and transport failure immediately when requesting an image", async () => {
-    const view = renderFirstbankPanel();
+    const view = renderNextbankPanel();
     let rejectRequest!: (reason: Error) => void;
     vi.mocked(view.api.post).mockImplementation(
       () =>
@@ -543,21 +543,22 @@ describe("bank verification feedback", () => {
     expect(view.api.post).toHaveBeenCalledTimes(1);
   });
   it("shows the returned image and requires input before verification", async () => {
-    const view = renderFirstbankPanel();
+    const view = renderNextbankPanel();
     vi.mocked(view.api.post).mockResolvedValue({
       captchaImage: "data:image/png;base64,AQID",
       expiresAt: new Date(Date.now() + 120000).toISOString(),
-      digitCount: 4,
+      captchaLength: 5,
+      captchaKind: "alphanumeric",
     });
     await fireEvent.click(
       await view.findByRole("button", { name: "改用手動驗證" }),
     );
     expect(
-      await view.findByRole("img", { name: "第一銀行圖形驗證碼" }),
+      await view.findByRole("img", { name: "將來圖形驗證碼" }),
     ).toBeInTheDocument();
     expect(view.getByRole("button", { name: "驗證並同步" })).toBeDisabled();
-    await fireEvent.input(view.getByPlaceholderText("4 位數字驗證碼"), {
-      target: { value: "1234" },
+    await fireEvent.input(view.getByPlaceholderText("5 位英數字驗證碼"), {
+      target: { value: "AB123" },
     });
     expect(view.getByRole("button", { name: "驗證並同步" })).toBeEnabled();
     expect(view.api.post).toHaveBeenCalledTimes(1);
@@ -566,11 +567,7 @@ describe("bank verification feedback", () => {
 
 describe("Nextbank CAPTCHA recovery", () => {
   const rejected = () =>
-    new ApiRequestError(
-      "USER_ACTION_REQUIRED",
-      "將來銀行需要重新驗證：captcha。",
-      400,
-    );
+    new ApiRequestError("NEXTBANK_CAPTCHA_REQUIRED", "請重新取得圖片。", 400);
   const image = () => ({
     captchaImage: "data:image/png;base64,AQID",
     expiresAt: new Date(Date.now() + 120000).toISOString(),

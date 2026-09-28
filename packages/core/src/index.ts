@@ -517,18 +517,8 @@ export const connectorCatalog = {
     capabilities: ["bank_account", "bank_balance_snapshot", "bank_transaction"],
     publicFields: [],
     credentialFields: ["userId", "account", "password"],
-    secretStateFields: [
-      "captchaUuid",
-      "captchaExpiresAt",
-      "captcha",
-      "accessToken",
-    ],
-    resetOnCredentialChangeFields: [
-      "captchaUuid",
-      "captchaExpiresAt",
-      "captcha",
-      "accessToken",
-    ],
+    secretStateFields: ["captchaUuid", "captchaExpiresAt"],
+    resetOnCredentialChangeFields: ["captchaUuid", "captchaExpiresAt"],
   },
   obank: {
     id: "obank",

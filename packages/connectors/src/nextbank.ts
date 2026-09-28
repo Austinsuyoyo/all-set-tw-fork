@@ -12,13 +12,8 @@ export const nextbankConfigSchema = z.object({
   userId: z.string().min(1).optional(),
   account: z.string().min(1).optional(),
   password: z.string().min(1).optional(),
-  accessToken: z.string().min(1).optional(),
   captchaUuid: z.string().min(1).optional(),
   captchaExpiresAt: z.number().int().optional(),
-  captcha: z
-    .string()
-    .regex(/^[A-Za-z0-9]{1,5}$/)
-    .optional(),
 });
 export type NextbankConfig = z.infer<typeof nextbankConfigSchema>;
 export function parseNextbankConfig(value: unknown): NextbankConfig {

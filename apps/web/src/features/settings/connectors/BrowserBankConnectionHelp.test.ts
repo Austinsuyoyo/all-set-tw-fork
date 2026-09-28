@@ -30,7 +30,6 @@ describe("BrowserBankConnectionHelp", () => {
       "4",
     );
 
-    expect(getByRole("button", { name: "驗證並同步" })).toBeDisabled();
     await fireEvent.input(getByPlaceholderText("4 位數字驗證碼"), {
       target: { value: "1234" },
     });

@@ -6,6 +6,7 @@ import {
   collectNextbankDepositPayloads,
   parseNextbankDeposits,
 } from "@taiwan-fin-hub/connectors";
+import { z } from "zod";
 import { prepareCtbcAuthorizationWrite } from "./ctbc-authorizations";
 import { prepareEsunAuthorizationWrite } from "./esun-authorizations";
 import { prepareSinopacAuthorizationWrite } from "./sinopac-authorizations";
@@ -184,6 +185,8 @@ export class NeedsUserActionError extends Error {
     super(message);
   }
 }
+
+export class NextbankCaptchaRequiredError extends NeedsUserActionError {}
 
 export type SinopacSyncOverrides = {
   captcha?: string;
@@ -1234,13 +1237,8 @@ export async function syncSinopac(
 
 function nextbankCleanConfig(stored: Record<string, unknown>) {
   const cleaned = { ...stored };
-  for (const key of [
-    "captchaUuid",
-    "captchaExpiresAt",
-    "captcha",
-    "accessToken",
-  ])
-    delete cleaned[key];
+  delete cleaned.captchaUuid;
+  delete cleaned.captchaExpiresAt;
   return cleaned;
 }
 
@@ -1334,9 +1332,11 @@ export async function syncNextbank(
   let token: string | undefined;
   let result: ReturnType<typeof parseNextbankDeposits>;
   try {
-    const submitted = nextbankConfigSchema.shape.captcha.safeParse(
-      overrides.captcha,
-    );
+    const submitted = z
+      .string()
+      .regex(/^[A-Za-z0-9]{1,5}$/)
+      .optional()
+      .safeParse(overrides.captcha);
     if (!submitted.success) throw new NextbankApiError("captcha");
     let answer = submitted.data;
     if (answer) {
@@ -1361,7 +1361,7 @@ export async function syncNextbank(
           )
         ).code;
       } catch {
-        throw new NeedsUserActionError(
+        throw new NextbankCaptchaRequiredError(
           "將來銀行驗證碼無法自動辨識，請改用人工輸入。",
         );
       }
@@ -1376,11 +1376,13 @@ export async function syncNextbank(
       await collectNextbankDepositPayloads(client, token),
     );
   } catch (error) {
+    if (error instanceof NextbankApiError && error.kind === "captcha") {
+      throw new NextbankCaptchaRequiredError("將來銀行需要重新驗證：captcha。");
+    }
     if (
       error instanceof NextbankApiError &&
       [
         "credentials",
-        "captcha",
         "session_conflict",
         "session_expired",
         "account_unavailable",

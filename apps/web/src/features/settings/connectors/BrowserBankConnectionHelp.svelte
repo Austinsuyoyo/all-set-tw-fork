@@ -34,48 +34,55 @@
   const operationPending = $derived(preparing || verifying || syncing);
 </script>
 
-{#if captchaImage}
-  <div class="mt-3 rounded-md border border-ink/10 bg-paper p-3">
-    <p class="text-sm font-medium text-ink/80">
-      請輸入圖片中的 {digitCount} 位{captchaKind === "alphanumeric"
-        ? "英數字"
-        : "數字"}，{expiresIn === undefined
-        ? "驗證碼約兩分鐘內有效。"
-        : expired
-          ? "驗證碼已過期，請重新取得。"
-          : `剩餘 ${expiresIn} 秒。`}
-    </p>
-    <div class="mt-2 flex flex-wrap items-center gap-2">
-      <img
-        src={captchaImage}
-        alt={`${bankName}圖形驗證碼`}
-        class="h-[70px] w-[200px] shrink-0 rounded border border-ink/25 bg-white object-fill shadow-sm"
-      />
-      <Input
-        class="min-w-40 flex-1"
-        inputmode={captchaKind === "alphanumeric" ? "text" : "numeric"}
-        maxlength={digitCount}
-        placeholder={`${digitCount} 位${captchaKind === "alphanumeric" ? "英數字" : "數字"}驗證碼`}
-        bind:value={captcha}
-      />
-      <Button
-        size="sm"
-        disabled={operationPending ||
-          expired ||
-          (captcha?.trim().length ?? 0) !== digitCount}
-        onclick={onVerify}
-        ><RefreshCw class="size-4" />{verifying
-          ? "同步中…"
-          : "驗證並同步"}</Button
-      >
-      <Button
-        size="sm"
-        variant="outline"
-        disabled={operationPending}
-        onclick={onRefresh}>換一張</Button
-      >
+{#snippet captchaPanel()}
+  {#if captchaImage}
+    <div class="mt-3 rounded-md border border-ink/10 bg-paper p-3">
+      <p class="text-sm font-medium text-ink/80">
+        請輸入圖片中的 {digitCount} 位{captchaKind === "alphanumeric"
+          ? "英數字"
+          : "數字"}，{expiresIn === undefined
+          ? "驗證碼約兩分鐘內有效。"
+          : expired
+            ? "驗證碼已過期，請重新取得。"
+            : `剩餘 ${expiresIn} 秒。`}
+      </p>
+      <div class="mt-2 flex flex-wrap items-center gap-2">
+        <img
+          src={captchaImage}
+          alt={`${bankName}圖形驗證碼`}
+          class="h-[70px] w-[200px] shrink-0 rounded border border-ink/25 bg-white object-fill shadow-sm"
+        />
+        <Input
+          class="min-w-40 flex-1"
+          inputmode={captchaKind === "alphanumeric" ? "text" : "numeric"}
+          maxlength={digitCount}
+          placeholder={`${digitCount} 位${captchaKind === "alphanumeric" ? "英數字" : "數字"}驗證碼`}
+          bind:value={captcha}
+        />
+        <Button
+          size="sm"
+          disabled={operationPending ||
+            expired ||
+            (bankName === "將來" &&
+              (captcha?.trim().length ?? 0) !== digitCount)}
+          onclick={onVerify}
+          ><RefreshCw class="size-4" />{verifying
+            ? "同步中…"
+            : "驗證並同步"}</Button
+        >
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={operationPending}
+          onclick={onRefresh}>換一張</Button
+        >
+      </div>
     </div>
-  </div>
+  {/if}
+{/snippet}
+
+{#if bankName === "將來"}
+  {@render captchaPanel()}
 {/if}
 
 <details
@@ -106,10 +113,10 @@
       </li>
       <li>帳密被拒絕時會立即停止、不會重試，以免累積錯誤次數導致停權。</li>
     {:else if bankName === "兆豐"}
-      <li>
-        透過兆豐 App API
-        查詢，每次登入需要五位數字驗證碼；自動辨識失敗可改用人工輸入。
-      </li>
+      <li>系統透過兆豐 App API 讀取資料，每次登入需要五位數字驗證碼。</li>
+      <li>系統會先自動辨識；若辨識失敗，可取得圖片後改用人工輸入。</li>
+      <li>一般帳密登入不需要快速登入或裝置綁定。</li>
+      <li>首次成功同步後會自動開啟排程；若手動關閉，後續同步會保留此選擇。</li>
     {:else}
       <li>首次或銀行 session 失效時，系統會自動辨識圖形驗證碼並登入。</li>
       <li>每次自動登入最多嘗試三張驗證碼，連續失敗後可改用人工輸入。</li>
@@ -122,3 +129,7 @@
     {/if}
   </ol>
 </details>
+
+{#if bankName !== "將來"}
+  {@render captchaPanel()}
+{/if}

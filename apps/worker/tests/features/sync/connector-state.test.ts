@@ -15,16 +15,12 @@ describe("connector state boundaries", () => {
         syncedAt: "2026-09-27",
         captchaUuid: "synthetic-challenge",
         captchaExpiresAt: 1000,
-        captcha: "12345",
-        accessToken: "synthetic-token",
       }),
     );
     expect(JSON.parse(split.safeCursor)).toEqual({ syncedAt: "2026-09-27" });
     expect(split.secretState).toEqual({
       captchaUuid: "synthetic-challenge",
       captchaExpiresAt: 1000,
-      captcha: "12345",
-      accessToken: "synthetic-token",
     });
   });
   it("keeps retired public preferences out of encrypted config", () => {

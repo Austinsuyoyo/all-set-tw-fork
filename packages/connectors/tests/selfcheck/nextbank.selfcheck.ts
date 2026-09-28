@@ -370,7 +370,7 @@ async function main() {
     0,
   );
   assert.equal(
-    nextbankConfigSchema.safeParse({ captcha: "too-long" }).success,
+    nextbankConfigSchema.safeParse({ captchaExpiresAt: "invalid" }).success,
     false,
   );
   const requests: Array<{ url: string; init: RequestInit }> = [];

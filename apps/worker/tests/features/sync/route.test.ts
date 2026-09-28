@@ -72,6 +72,7 @@ vi.mock("../../../src/features/sync/scheduler-queue", () => ({
 
 vi.mock("../../../src/features/sync/service", () => ({
   NeedsUserActionError: class NeedsUserActionError extends Error {},
+  NextbankCaptchaRequiredError: class NextbankCaptchaRequiredError extends Error {},
   prepareSinopacCaptchaSession: vi.fn(),
   prepareHncbCaptchaSession: mocks.prepareHncbCaptchaSession,
   prepareKgibankCaptchaSession: mocks.prepareKgibankCaptchaSession,
@@ -110,6 +111,7 @@ vi.mock("../../../src/features/sync/service", () => ({
 }));
 
 import { syncRoutes } from "../../../src/features/sync/route";
+import { NextbankCaptchaRequiredError } from "../../../src/features/sync/service";
 
 const env = {} as Env;
 
@@ -819,6 +821,20 @@ describe("Nextbank sync routes", () => {
     );
     expect(response.status).toBe(400);
     expect(mocks.syncNextbank).not.toHaveBeenCalled();
+  });
+  it("returns a stable code when a new CAPTCHA is required", async () => {
+    mocks.syncNextbank.mockRejectedValueOnce(
+      new NextbankCaptchaRequiredError("請重新取得驗證碼。"),
+    );
+    const response = await syncRoutes.request(
+      "/connectors/nextbank/sync",
+      { method: "POST" },
+      env,
+    );
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "NEXTBANK_CAPTCHA_REQUIRED" },
+    });
   });
 });
 

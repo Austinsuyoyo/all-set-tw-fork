@@ -33,8 +33,8 @@ for (const width of [1440, 390])
           status: 400,
           json: {
             error: {
-              code: "USER_ACTION_REQUIRED",
-              message: "將來銀行需要重新驗證：captcha。",
+              code: "NEXTBANK_CAPTCHA_REQUIRED",
+              message: "請重新取得圖片。",
             },
           },
         });

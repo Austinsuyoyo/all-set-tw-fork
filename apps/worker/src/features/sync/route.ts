@@ -47,6 +47,7 @@ import { jsonError } from "../../platform/http";
 import { validationHook } from "../../platform/validation";
 import {
   NeedsUserActionError,
+  NextbankCaptchaRequiredError,
   safeErrorMessage,
   SyncAlreadyRunningError,
   SYNC_SCOPE_ALL,
@@ -742,6 +743,13 @@ async function syncRouteResponse(
     }
     if (error instanceof TdccConnectionError) {
       return jsonError("TDCC_CONNECTION_FAILED", safeErrorMessage(error), 400);
+    }
+    if (error instanceof NextbankCaptchaRequiredError) {
+      return jsonError(
+        "NEXTBANK_CAPTCHA_REQUIRED",
+        safeErrorMessage(error),
+        400,
+      );
     }
     if (error instanceof NeedsUserActionError) {
       return jsonError("USER_ACTION_REQUIRED", safeErrorMessage(error), 400);

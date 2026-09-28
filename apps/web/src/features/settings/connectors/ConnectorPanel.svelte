@@ -39,7 +39,6 @@
   import {
     browserCaptchaFailure,
     needsNextbankCaptcha,
-    isNextbankCaptchaMessage,
   } from "./browser-captcha";
   import { shouldEnableScheduleAfterFirstSync } from "./schedule-after-sync";
 
@@ -234,7 +233,7 @@
     mutationFn: async (target: SyncTarget) => {
       if (demoMode) throw new Error("Demo site 已停用連接器同步。");
       if (browserBank) {
-        bankOperation = "sync";
+        if (connectorId === "nextbank") bankOperation = "sync";
         bankCaptchaImage = "";
         bankCaptcha = "";
       }
@@ -262,7 +261,7 @@
     },
     onSuccess: (_data, _target, context) => {
       error = "";
-      if (browserBank) bankOperation = "success";
+      if (connectorId === "nextbank") bankOperation = "success";
       if (connectorId === "cathaybk") {
         resetCathayVerification();
         cathayVerificationStep = "complete";
@@ -353,7 +352,7 @@
     mutationFn: () => {
       if (demoMode) throw new Error("Demo site 已停用連接器同步。");
       if (!browserBank) throw new Error("此資料來源不支援圖形驗證。");
-      bankOperation = "captcha";
+      if (connectorId === "nextbank") bankOperation = "captcha";
       bankCaptchaImage = "";
       bankCaptcha = "";
       error = "";
@@ -389,7 +388,7 @@
     }),
     mutationFn: () => {
       if (demoMode) throw new Error("Demo site 已停用連接器同步。");
-      bankOperation = "sync";
+      if (connectorId === "nextbank") bankOperation = "sync";
       bankVerificationSubmitted = false;
       if (!bankCaptchaExpiresAt || Date.now() >= bankCaptchaExpiresAt)
         throw new Error("驗證碼已過期，請重新取得圖片。");
@@ -410,7 +409,7 @@
       error = "";
       bankCaptcha = "";
       bankCaptchaImage = "";
-      bankOperation = "success";
+      if (connectorId === "nextbank") bankOperation = "success";
       qc.invalidateQueries({
         queryKey: queryKeys.connectorSettings(connectorId),
       });
@@ -802,10 +801,70 @@
         >
           <ShieldCheck class="size-3.5" />等待完成身分驗證
         </span>
-      {:else if browserBank}
+      {:else if connectorId === "nextbank"}
         <span class="text-sm text-muted-foreground"
           >在下方查看進度與同步帳戶</span
         >
+      {:else if browserBank}
+        {#if browserBankSessionAvailable}
+          <Button
+            size="sm"
+            disabled={demoMode ||
+              $sync.isPending ||
+              $verifyBrowserBank.isPending}
+            onclick={() => {
+              error = "";
+              $sync.mutate("default");
+            }}
+            ><RefreshCw class="size-4" />{$sync.isPending
+              ? "同步中…"
+              : "同步"}</Button
+          >
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={demoMode ||
+              $prepareBrowserBank.isPending ||
+              $verifyBrowserBank.isPending}
+            onclick={() => {
+              error = "";
+              $prepareBrowserBank.mutate();
+            }}
+            ><KeyRound class="size-4" />{$prepareBrowserBank.isPending
+              ? "取得中…"
+              : "人工重新驗證"}</Button
+          >
+        {:else}
+          <Button
+            size="sm"
+            disabled={demoMode ||
+              $sync.isPending ||
+              $prepareBrowserBank.isPending ||
+              $verifyBrowserBank.isPending}
+            onclick={() => {
+              error = "";
+              $sync.mutate("default");
+            }}
+            ><RefreshCw
+              class={$sync.isPending ? "size-4 animate-spin" : "size-4"}
+            />{$sync.isPending ? "自動驗證中…" : "自動驗證並同步"}</Button
+          >
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={demoMode ||
+              $sync.isPending ||
+              $prepareBrowserBank.isPending ||
+              $verifyBrowserBank.isPending}
+            onclick={() => {
+              error = "";
+              $prepareBrowserBank.mutate();
+            }}
+            ><KeyRound class="size-4" />{$prepareBrowserBank.isPending
+              ? "取得中…"
+              : "人工輸入驗證碼"}</Button
+          >
+        {/if}
       {:else}
         <Button
           size="sm"
@@ -852,130 +911,134 @@
       source="cathaybk"
     />
   {:else if browserBank}
-    <section
-      aria-label="同步進度"
-      aria-live="polite"
-      class="mt-3 rounded-xl border border-border bg-muted/40 p-4"
-    >
-      {#if !$settings.data?.credentialsComplete}
-        <p class="font-semibold">先儲存帳密</p>
+    {#if connectorId === "nextbank"}
+      <section
+        aria-label="同步進度"
+        aria-live="polite"
+        class="mt-3 rounded-xl border border-border bg-muted/40 p-4"
+      >
+        {#if !$settings.data?.credentialsComplete}
+          <p class="font-semibold">先儲存帳密</p>
+          <p class="mt-1 text-sm text-muted-foreground">
+            請填寫下方連線憑證並儲存，再按「同步帳戶」。
+          </p>
+        {:else if $prepareBrowserBank.isPending}
+          <p role="status" class="font-semibold">正在取得驗證碼圖片…</p>
+          <p class="mt-1 text-sm">
+            取得後會在下方顯示圖片與輸入欄，請勿重複點擊。
+          </p>
+        {:else if $sync.isPending || $verifyBrowserBank.isPending || job?.running}
+          <p role="status" class="font-semibold">正在登入並查詢帳戶…</p>
+          <p class="mt-1 text-sm">尚未完成同步，請勿重複提交。</p>
+        {:else if error}
+          <p role="alert" class="font-semibold text-coral">
+            {bankOperation === "captcha"
+              ? "無法取得驗證碼"
+              : "同步未完成"}：{error.includes("transport")
+              ? "目前無法連線到銀行，這不代表帳密錯誤。請稍後再試；手動驗證無法解決連線問題。"
+              : error}
+          </p>
+        {:else if bankOperation === "success"}
+          <p role="status" class="font-semibold text-moss">
+            同步成功，帳戶資料已更新。
+          </p>
+        {:else if bankCaptchaImage}
+          <p class="font-semibold">
+            {bankCaptchaSeconds > 0
+              ? "請輸入下方圖片中的驗證碼"
+              : "驗證碼已過期"}
+          </p>
+          <p class="mt-1 text-sm">
+            {bankCaptchaSeconds > 0
+              ? "填寫後按「驗證並同步」，目前尚未登入或同步。"
+              : "請按下方「換一張」取得新圖片。"}
+          </p>
+        {:else if job?.lastStatus === "needs_user_action"}
+          <p class="font-semibold">需要處理登入驗證</p>
+          <p class="mt-1 text-sm">
+            請查看最近失敗原因；若需手動輸入驗證碼，可按「改用手動驗證」。
+          </p>
+        {:else}
+          <p class="font-semibold">可以開始同步</p>
+          <p class="mt-1 text-sm text-muted-foreground">
+            「同步帳戶」會自動處理登入與圖形驗證碼。只有辨識失敗，或你想自行輸入圖片內容時，才使用「改用手動驗證」。
+          </p>
+        {/if}
+        {#if !bankCaptchaImage}
+          <div class="mt-3 flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              disabled={demoMode ||
+                !$settings.data?.credentialsComplete ||
+                job?.running ||
+                $save.isPending ||
+                $sync.isPending ||
+                $prepareBrowserBank.isPending ||
+                $verifyBrowserBank.isPending}
+              onclick={() => {
+                error = "";
+                $sync.mutate("default");
+              }}
+            >
+              <RefreshCw
+                class={$sync.isPending || $verifyBrowserBank.isPending
+                  ? "size-4 animate-spin"
+                  : "size-4"}
+              />
+              {$sync.isPending || $verifyBrowserBank.isPending
+                ? "同步中…"
+                : "同步帳戶"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={demoMode ||
+                !$settings.data?.credentialsComplete ||
+                job?.running ||
+                $save.isPending ||
+                $sync.isPending ||
+                $prepareBrowserBank.isPending ||
+                $verifyBrowserBank.isPending}
+              onclick={() => $prepareBrowserBank.mutate()}
+            >
+              <KeyRound class="size-4" />{$prepareBrowserBank.isPending
+                ? "取得驗證碼中…"
+                : bankOperation === "captcha"
+                  ? "重新取得驗證碼"
+                  : "改用手動驗證"}
+            </Button>
+          </div>
+        {/if}
+        <p class="mt-3 border-t border-border pt-3 text-sm">
+          最近同步結果：{bankOperation === "success"
+            ? "成功"
+            : bankOperation === "sync" && error
+              ? "失敗"
+              : job?.lastStatus === "success"
+                ? "成功"
+                : job?.lastStatus === "failed"
+                  ? "失敗"
+                  : job?.lastStatus === "needs_user_action"
+                    ? "未完成，需要驗證"
+                    : "尚未同步"}
+        </p>
+        {#if job?.lastRunAt}<p class="mt-1 text-sm text-muted-foreground">
+            最近嘗試：{formatDateTime(job.lastRunAt)}
+          </p>{/if}
         <p class="mt-1 text-sm text-muted-foreground">
-          請填寫下方連線憑證並儲存，再按「同步帳戶」。
+          最近成功更新：{job?.lastSuccessAt
+            ? formatDateTime(job.lastSuccessAt)
+            : "尚無成功紀錄"}
         </p>
-      {:else if $prepareBrowserBank.isPending}
-        <p role="status" class="font-semibold">正在取得驗證碼圖片…</p>
-        <p class="mt-1 text-sm">
-          取得後會在下方顯示圖片與輸入欄，請勿重複點擊。
-        </p>
-      {:else if $sync.isPending || $verifyBrowserBank.isPending || job?.running}
-        <p role="status" class="font-semibold">正在登入並查詢帳戶…</p>
-        <p class="mt-1 text-sm">尚未完成同步，請勿重複提交。</p>
-      {:else if error}
-        <p role="alert" class="font-semibold text-coral">
-          {bankOperation === "captcha"
-            ? "無法取得驗證碼"
-            : "同步未完成"}：{error.includes("transport")
-            ? "目前無法連線到銀行，這不代表帳密錯誤。請稍後再試；手動驗證無法解決連線問題。"
-            : error}
-        </p>
-      {:else if bankOperation === "success"}
-        <p role="status" class="font-semibold text-moss">
-          同步成功，帳戶資料已更新。
-        </p>
-      {:else if bankCaptchaImage}
-        <p class="font-semibold">
-          {bankCaptchaSeconds > 0 ? "請輸入下方圖片中的驗證碼" : "驗證碼已過期"}
-        </p>
-        <p class="mt-1 text-sm">
-          {bankCaptchaSeconds > 0
-            ? "填寫後按「驗證並同步」，目前尚未登入或同步。"
-            : "請按下方「換一張」取得新圖片。"}
-        </p>
-      {:else if connectorId === "nextbank" && job?.lastStatus !== "success" && isNextbankCaptchaMessage(job?.lastError ?? "")}
-        <p class="font-semibold">需要你輸入驗證碼</p>
-        <p class="mt-1 text-sm">
-          請按「改用手動驗證」取得新圖片，填寫後按「驗證並同步」。
-        </p>
-      {:else}
-        <p class="font-semibold">可以開始同步</p>
-        <p class="mt-1 text-sm text-muted-foreground">
-          「同步帳戶」會自動處理登入與圖形驗證碼。只有辨識失敗，或你想自行輸入圖片內容時，才使用「改用手動驗證」。
-        </p>
-      {/if}
-      {#if !bankCaptchaImage}
-        <div class="mt-3 flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            disabled={demoMode ||
-              !$settings.data?.credentialsComplete ||
-              job?.running ||
-              $save.isPending ||
-              $sync.isPending ||
-              $prepareBrowserBank.isPending ||
-              $verifyBrowserBank.isPending}
-            onclick={() => {
-              error = "";
-              $sync.mutate("default");
-            }}
+        {#if !error && bankOperation === "idle" && job?.lastStatus !== "success" && job?.lastError}<p
+            class="mt-1 text-sm text-coral"
           >
-            <RefreshCw
-              class={$sync.isPending || $verifyBrowserBank.isPending
-                ? "size-4 animate-spin"
-                : "size-4"}
-            />
-            {$sync.isPending || $verifyBrowserBank.isPending
-              ? "同步中…"
-              : "同步帳戶"}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={demoMode ||
-              !$settings.data?.credentialsComplete ||
-              job?.running ||
-              $save.isPending ||
-              $sync.isPending ||
-              $prepareBrowserBank.isPending ||
-              $verifyBrowserBank.isPending}
-            onclick={() => $prepareBrowserBank.mutate()}
-          >
-            <KeyRound class="size-4" />{$prepareBrowserBank.isPending
-              ? "取得驗證碼中…"
-              : bankOperation === "captcha"
-                ? "重新取得驗證碼"
-                : "改用手動驗證"}
-          </Button>
-        </div>
-      {/if}
-      <p class="mt-3 border-t border-border pt-3 text-sm">
-        最近同步結果：{bankOperation === "success"
-          ? "成功"
-          : bankOperation === "sync" && error
-            ? "失敗"
-            : job?.lastStatus === "success"
-              ? "成功"
-              : job?.lastStatus === "failed"
-                ? "失敗"
-                : job?.lastStatus === "needs_user_action"
-                  ? "未完成，需要驗證"
-                  : "尚未同步"}
-      </p>
-      {#if job?.lastRunAt}<p class="mt-1 text-sm text-muted-foreground">
-          最近嘗試：{formatDateTime(job.lastRunAt)}
-        </p>{/if}
-      <p class="mt-1 text-sm text-muted-foreground">
-        最近成功更新：{job?.lastSuccessAt
-          ? formatDateTime(job.lastSuccessAt)
-          : "尚無成功紀錄"}
-      </p>
-      {#if !error && bankOperation === "idle" && job?.lastStatus !== "success" && job?.lastError}<p
-          class="mt-1 text-sm text-coral"
-        >
-          最近失敗原因：{job.lastError.includes("transport")
-            ? "無法連線到銀行，請稍後再試。"
-            : job.lastError}
-        </p>{/if}
-    </section>
+            最近失敗原因：{job.lastError.includes("transport")
+              ? "無法連線到銀行，請稍後再試。"
+              : job.lastError}
+          </p>{/if}
+      </section>
+    {/if}
     <BrowserBankConnectionHelp
       bankName={connectorId === "nextbank"
         ? "將來"
@@ -999,7 +1062,7 @@
       preparing={$prepareBrowserBank.isPending}
       verifying={$verifyBrowserBank.isPending}
       syncing={$sync.isPending}
-      expiresIn={bankCaptchaSeconds}
+      expiresIn={connectorId === "nextbank" ? bankCaptchaSeconds : undefined}
       onVerify={() => {
         error = "";
         $verifyBrowserBank.mutate();
@@ -1016,7 +1079,12 @@
           <span class="font-semibold text-ink">
             自動同步：{job?.enabled ? "開" : "關"}
           </span>
-          {#if job && !browserBank}<span
+          {#if browserBank && connectorId !== "nextbank"}<span
+              >登入：{browserBankSessionAvailable
+                ? "session 可自動續用"
+                : "下次同步會自動驗證"}</span
+            >{/if}
+          {#if job && connectorId !== "nextbank"}<span
               >狀態：{job.running
                 ? "同步中"
                 : job.lastStatus === "success"
@@ -1028,7 +1096,7 @@
                       : "尚未同步"}</span
             >{/if}
         </div>
-        {#if job?.lastRunAt && !browserBank}
+        {#if job?.lastRunAt && connectorId !== "nextbank"}
           <p class="mt-1 text-sm text-muted-foreground">
             最近嘗試：{formatDateTime(job.lastRunAt)}
           </p>
@@ -1039,15 +1107,17 @@
           variant="outline"
           disabled={demoMode || $updateJob.isPending}
           onclick={() => $updateJob.mutate({ enabled: !job.enabled })}
-          >{job.enabled ? "關閉自動同步" : "開啟自動同步"}</Button
+          >{job.enabled ? "關閉" : "開啟"}</Button
         >{/if}
     </div>
 
-    <p class="mt-2 text-sm text-muted-foreground">
-      {job?.enabled
-        ? "依下方排程自動嘗試同步；結果請看同步進度。"
-        : "目前只會在你手動操作時同步。"}
-    </p>
+    {#if connectorId === "nextbank"}
+      <p class="mt-2 text-sm text-muted-foreground">
+        {job?.enabled
+          ? "依下方排程自動嘗試同步；結果請看同步進度。"
+          : "目前只會在你手動操作時同步。"}
+      </p>
+    {/if}
     {#if job?.enabled}
       <div class="mt-3 grid gap-3 border-t border-ink/10 pt-3 md:grid-cols-4">
         <label class="grid gap-1 text-sm font-semibold text-ink/70">
@@ -1141,7 +1211,7 @@
         {/if}
       </div>
     {/if}
-    {#if !browserBank && (error || ((job?.lastStatus === "failed" || job?.lastStatus === "needs_user_action") && !bankCaptchaImage))}<p
+    {#if connectorId !== "nextbank" && (error || ((job?.lastStatus === "failed" || job?.lastStatus === "needs_user_action") && !bankCaptchaImage))}<p
         class="mt-2 text-sm text-coral"
       >
         {error
