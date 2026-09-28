@@ -43,6 +43,7 @@ import {
   prepareMegabankCaptcha,
   parseFirstbankConfig,
 } from "@taiwan-fin-hub/connectors";
+import { BrowserRunCapacityError } from "../../connectors/browser";
 import {
   CathayOtpChannelRequiredError,
   CathayOtpInvalidError,
@@ -2767,6 +2768,7 @@ function serializePublicConfig(connectorId: ConnectorId, config: object) {
 }
 
 export function isUserActionError(error: unknown) {
+  if (error instanceof BrowserRunCapacityError) return false;
   if (
     error instanceof NeedsUserActionError ||
     error instanceof CathayOtpChannelRequiredError ||

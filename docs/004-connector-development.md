@@ -86,10 +86,18 @@ Connector 不得依賴 Hono、D1、Worker `Env`，也不得直接寫入資料庫
 `apps/worker/src/connectors/browser.ts` 的 `launchBrowserWithRetry`，不得直接呼叫
 `puppeteer.launch`。共用 adapter 在 binding `fetch` 層僅針對建立瀏覽器的
 `POST /v1/devtools/browser` 請求依 HTTP status `503` 判斷重試，不比對錯誤文案。
-預設等待 2 秒、5 秒後重試，
-最多嘗試 3 次；耗盡後保留原始錯誤，交由既有同步失敗流程處理。結構化 log
-只記錄狀態碼、嘗試次數與重試延遲。`429` 額度／限流錯誤維持既有處理，
-session 重連、瀏覽器建立後的操作與銀行登入不在此重試範圍內。
+預設等待 2 秒、5 秒後重試，最多嘗試 3 次；`503` 耗盡後保留原始錯誤。
+結構化 log 只記錄狀態碼、嘗試次數與重試延遲。建立瀏覽器時遇到 Browser Run
+每日額度或限流，`classifyBrowserRunCapacityError` 會轉成共用的
+`BrowserRunCapacityError`；不相關錯誤原樣傳遞。每日額度依 Cloudflare 的 UTC
+隔日重置，使用者訊息說明「每日台灣時間早上 8 點重置」，`Retry-After` 為距離
+下一次重置的秒數。五家原有的 `puppeteer.limits` 啟動頻率預先檢查也使用共用錯誤，
+並保留當下取得的等待秒數。
+
+手動同步與驗證碼 route 對共用錯誤回應 `429 BROWSER_BUSY`；同步紀錄維持
+`failed`，排程在下一輪照常重試。銀行專屬 capacity error 只處理驗證碼作業或
+session 忙碌，原有專屬 API 錯誤碼仍供這些情境使用。session 重連、瀏覽器建立後
+的操作與銀行登入不在共用辨識及建立重試範圍內。
 
 ## 正規化資料契約
 

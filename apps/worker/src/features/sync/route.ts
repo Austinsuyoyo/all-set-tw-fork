@@ -14,6 +14,7 @@ import {
 import { zValidator } from "@hono/zod-validator";
 import { type Context, type Hono } from "hono";
 import { z } from "zod";
+import { BrowserRunCapacityError } from "../../connectors/browser";
 import {
   FirstbankBrowserCapacityError,
   FirstbankConnectionError,
@@ -276,6 +277,8 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
           409,
         );
       }
+      if (error instanceof BrowserRunCapacityError)
+        return browserRunBusyResponse(error);
       if (error instanceof SinopacBrowserCapacityError) {
         const response = jsonError("SINOPAC_BROWSER_BUSY", error.message, 429);
         response.headers.set("Retry-After", String(error.retryAfterSeconds));
@@ -323,6 +326,8 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
           409,
         );
       }
+      if (error instanceof BrowserRunCapacityError)
+        return browserRunBusyResponse(error);
       if (error instanceof TaishinBrowserCapacityError) {
         const response = jsonError("TAISHIN_BROWSER_BUSY", error.message, 429);
         response.headers.set("Retry-After", String(error.retryAfterSeconds));
@@ -374,6 +379,8 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
           409,
         );
       }
+      if (error instanceof BrowserRunCapacityError)
+        return browserRunBusyResponse(error);
       if (error instanceof HncbBrowserCapacityError) {
         const response = jsonError("HNCB_BROWSER_BUSY", error.message, 429);
         response.headers.set("Retry-After", String(error.retryAfterSeconds));
@@ -421,6 +428,8 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
           409,
         );
       }
+      if (error instanceof BrowserRunCapacityError)
+        return browserRunBusyResponse(error);
       if (error instanceof KgibankBrowserCapacityError) {
         const response = jsonError("KGIBANK_BROWSER_BUSY", error.message, 429);
         response.headers.set("Retry-After", String(error.retryAfterSeconds));
@@ -557,6 +566,8 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
           409,
         );
       }
+      if (error instanceof BrowserRunCapacityError)
+        return browserRunBusyResponse(error);
       if (error instanceof NeedsUserActionError) {
         return jsonError("USER_ACTION_REQUIRED", error.message, 400);
       }
@@ -703,6 +714,8 @@ async function syncRouteResponse(
     if (error instanceof SyncAlreadyRunningError) {
       return jsonError("SYNC_ALREADY_RUNNING", safeErrorMessage(error), 409);
     }
+    if (error instanceof BrowserRunCapacityError)
+      return browserRunBusyResponse(error);
     if (error instanceof CathayOtpChannelRequiredError) {
       return jsonError(
         "CATHAY_OTP_CHANNEL_REQUIRED",
@@ -853,4 +866,10 @@ async function syncRouteResponse(
     }
     return jsonError("SYNC_FAILED", safeErrorMessage(error), 500);
   }
+}
+
+function browserRunBusyResponse(error: BrowserRunCapacityError) {
+  const response = jsonError("BROWSER_BUSY", safeErrorMessage(error), 429);
+  response.headers.set("Retry-After", String(error.retryAfterSeconds));
+  return response;
 }

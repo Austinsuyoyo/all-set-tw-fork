@@ -4,6 +4,7 @@ import {
   ObankConnectionError,
   SkbankConnectionError,
 } from "@taiwan-fin-hub/connectors";
+import { BrowserRunCapacityError } from "../../../src/connectors/browser";
 import {
   FirstbankBrowserCapacityError,
   FirstbankConnectionError,
@@ -33,6 +34,7 @@ const mocks = vi.hoisted(() => ({
   cancelQueuedTdccSyncRun: vi.fn(),
   enqueueEinvoiceSyncChunk: vi.fn(),
   enqueueTdccSyncChunk: vi.fn(),
+  prepareSinopacCaptchaSession: vi.fn(),
   prepareTaishinCaptchaSession: vi.fn(),
   prepareHncbCaptchaSession: vi.fn(),
   prepareKgibankCaptchaSession: vi.fn(),
@@ -51,6 +53,7 @@ const mocks = vi.hoisted(() => ({
   syncFirstbank: vi.fn(),
   syncHncb: vi.fn(),
   syncKgibank: vi.fn(),
+  syncSinopac: vi.fn(),
   syncTaishin: vi.fn(),
   syncSkbank: vi.fn(),
 }));
@@ -73,7 +76,7 @@ vi.mock("../../../src/features/sync/scheduler-queue", () => ({
 vi.mock("../../../src/features/sync/service", () => ({
   NeedsUserActionError: class NeedsUserActionError extends Error {},
   NextbankCaptchaRequiredError: class NextbankCaptchaRequiredError extends Error {},
-  prepareSinopacCaptchaSession: vi.fn(),
+  prepareSinopacCaptchaSession: mocks.prepareSinopacCaptchaSession,
   prepareHncbCaptchaSession: mocks.prepareHncbCaptchaSession,
   prepareKgibankCaptchaSession: mocks.prepareKgibankCaptchaSession,
   prepareTaishinCaptchaSession: mocks.prepareTaishinCaptchaSession,
@@ -88,7 +91,7 @@ vi.mock("../../../src/features/sync/service", () => ({
   syncCtbc: mocks.syncCtbc,
   syncEinvoice: vi.fn(),
   syncEsun: mocks.syncEsun,
-  syncSinopac: vi.fn(),
+  syncSinopac: mocks.syncSinopac,
   syncObank: mocks.syncObank,
   syncMegabank: mocks.syncMegabank,
   syncFirstbank: mocks.syncFirstbank,
@@ -1031,4 +1034,59 @@ describe("First Bank web sync routes", () => {
       error: { code: "FIRSTBANK_BROWSER_BUSY" },
     });
   });
+});
+
+describe("shared Browser Run capacity responses", () => {
+  it.each([
+    ["esun", mocks.syncEsun],
+    ["cathaybk", mocks.syncCathaybk],
+    ["sinopac", mocks.syncSinopac],
+    ["taishin", mocks.syncTaishin],
+    ["hncb", mocks.syncHncb],
+    ["kgibank", mocks.syncKgibank],
+    ["firstbank", mocks.syncFirstbank],
+  ])("maps %s sync failures to BROWSER_BUSY", async (connectorId, sync) => {
+    sync.mockRejectedValueOnce(new BrowserRunCapacityError("rate_limit", 20));
+    const response = await syncRoutes.request(
+      `/connectors/${connectorId}/sync`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      },
+      env,
+    );
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBe("20");
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "BROWSER_BUSY" },
+    });
+  });
+
+  it.each([
+    ["sinopac", mocks.prepareSinopacCaptchaSession],
+    ["taishin", mocks.prepareTaishinCaptchaSession],
+    ["hncb", mocks.prepareHncbCaptchaSession],
+    ["kgibank", mocks.prepareKgibankCaptchaSession],
+    ["firstbank", mocks.prepareFirstbankCaptchaSession],
+  ])(
+    "maps %s CAPTCHA failures to BROWSER_BUSY",
+    async (connectorId, prepare) => {
+      prepare.mockRejectedValueOnce(
+        new BrowserRunCapacityError("acquisition_rate_limit", 17),
+      );
+      const response = await syncRoutes.request(
+        `/connectors/${connectorId}/captcha`,
+        { method: "POST" },
+        env,
+      );
+
+      expect(response.status).toBe(429);
+      expect(response.headers.get("Retry-After")).toBe("17");
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "BROWSER_BUSY" },
+      });
+    },
+  );
 });
