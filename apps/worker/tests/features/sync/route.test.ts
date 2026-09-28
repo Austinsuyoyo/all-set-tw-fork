@@ -38,6 +38,8 @@ const mocks = vi.hoisted(() => ({
   prepareKgibankCaptchaSession: vi.fn(),
   prepareObankCaptchaSession: vi.fn(),
   prepareMegabankCaptchaSession: vi.fn(),
+  prepareNextbankCaptchaSession: vi.fn(),
+  syncNextbank: vi.fn(),
   prepareFirstbankCaptchaSession: vi.fn(),
   startEinvoiceSyncRun: vi.fn(),
   startTdccSyncRun: vi.fn(),
@@ -70,12 +72,15 @@ vi.mock("../../../src/features/sync/scheduler-queue", () => ({
 
 vi.mock("../../../src/features/sync/service", () => ({
   NeedsUserActionError: class NeedsUserActionError extends Error {},
+  NextbankCaptchaRequiredError: class NextbankCaptchaRequiredError extends Error {},
   prepareSinopacCaptchaSession: vi.fn(),
   prepareHncbCaptchaSession: mocks.prepareHncbCaptchaSession,
   prepareKgibankCaptchaSession: mocks.prepareKgibankCaptchaSession,
   prepareTaishinCaptchaSession: mocks.prepareTaishinCaptchaSession,
   prepareObankCaptchaSession: mocks.prepareObankCaptchaSession,
   prepareMegabankCaptchaSession: mocks.prepareMegabankCaptchaSession,
+  prepareNextbankCaptchaSession: mocks.prepareNextbankCaptchaSession,
+  syncNextbank: mocks.syncNextbank,
   prepareFirstbankCaptchaSession: mocks.prepareFirstbankCaptchaSession,
   safeErrorMessage: (error: unknown) =>
     error instanceof Error ? error.message : String(error),
@@ -106,6 +111,7 @@ vi.mock("../../../src/features/sync/service", () => ({
 }));
 
 import { syncRoutes } from "../../../src/features/sync/route";
+import { NextbankCaptchaRequiredError } from "../../../src/features/sync/service";
 
 const env = {} as Env;
 
@@ -765,6 +771,69 @@ describe("KGI Bank sync routes", () => {
     expect(failed.status).toBe(502);
     await expect(failed.json()).resolves.toMatchObject({
       error: { code: "KGIBANK_CONNECTION_FAILED" },
+    });
+  });
+});
+
+describe("Nextbank sync routes", () => {
+  it("returns a challenge and forwards the manual answer to the runtime", async () => {
+    mocks.prepareNextbankCaptchaSession.mockResolvedValueOnce({
+      captchaImage: "data:image/png;base64,AQID",
+      captchaLength: 5,
+      captchaKind: "alphanumeric",
+    });
+    const challenge = await syncRoutes.request(
+      "/connectors/nextbank/captcha",
+      { method: "POST" },
+      env,
+    );
+    expect(challenge.status).toBe(200);
+    expect(await challenge.json()).toMatchObject({ captchaLength: 5 });
+    mocks.syncNextbank.mockResolvedValueOnce({
+      success: true,
+      connectorId: "nextbank",
+      scope: "all",
+      records: 0,
+    });
+    const synced = await syncRoutes.request(
+      "/connectors/nextbank/sync",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ captcha: "A1b2C" }),
+      },
+      env,
+    );
+    expect(synced.status).toBe(200);
+    expect(mocks.syncNextbank).toHaveBeenCalledWith(env, "manual", {
+      captcha: "A1b2C",
+    });
+  });
+  it("rejects invalid answers before reaching the bank runtime", async () => {
+    const response = await syncRoutes.request(
+      "/connectors/nextbank/sync",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ captcha: "abcdef" }),
+      },
+      env,
+    );
+    expect(response.status).toBe(400);
+    expect(mocks.syncNextbank).not.toHaveBeenCalled();
+  });
+  it("returns a stable code when a new CAPTCHA is required", async () => {
+    mocks.syncNextbank.mockRejectedValueOnce(
+      new NextbankCaptchaRequiredError("請重新取得驗證碼。"),
+    );
+    const response = await syncRoutes.request(
+      "/connectors/nextbank/sync",
+      { method: "POST" },
+      env,
+    );
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "NEXTBANK_CAPTCHA_REQUIRED" },
     });
   });
 });

@@ -47,6 +47,7 @@ import { jsonError } from "../../platform/http";
 import { validationHook } from "../../platform/validation";
 import {
   NeedsUserActionError,
+  NextbankCaptchaRequiredError,
   safeErrorMessage,
   SyncAlreadyRunningError,
   SYNC_SCOPE_ALL,
@@ -459,6 +460,50 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
     },
   );
 
+  api.post("/connectors/nextbank/captcha", async (c) => {
+    try {
+      return c.json(await prepareConnectorChallenge(c.env, "nextbank"));
+    } catch (error) {
+      if (error instanceof SyncAlreadyRunningError)
+        return jsonError(
+          "SYNC_ALREADY_RUNNING",
+          "將來銀行已有作業進行中。",
+          409,
+        );
+      if (error instanceof NeedsUserActionError)
+        return jsonError("USER_ACTION_REQUIRED", error.message, 400);
+      return jsonError("NEXTBANK_CAPTCHA_FAILED", safeErrorMessage(error), 502);
+    }
+  });
+  api.post(
+    "/connectors/nextbank/sync",
+    zValidator(
+      "json",
+      z.object({
+        captcha: z
+          .string()
+          .regex(/^[A-Za-z0-9]{1,5}$/)
+          .optional(),
+      }),
+      validationHook("INVALID_REQUEST", "將來銀行驗證碼格式不符。"),
+    ),
+    async (c) => {
+      const overrides = c.req.valid("json");
+      return syncRouteResponse(
+        c,
+        withManualSyncLock(c.env, "nextbank", SYNC_SCOPE_ALL, () =>
+          runConnectorSync(
+            c.env,
+            "nextbank",
+            "manual",
+            SYNC_SCOPE_ALL,
+            overrides,
+          ),
+        ),
+      );
+    },
+  );
+
   api.post("/connectors/obank/captcha", async (c) => {
     try {
       return c.json(await prepareConnectorChallenge(c.env, "obank"));
@@ -698,6 +743,13 @@ async function syncRouteResponse(
     }
     if (error instanceof TdccConnectionError) {
       return jsonError("TDCC_CONNECTION_FAILED", safeErrorMessage(error), 400);
+    }
+    if (error instanceof NextbankCaptchaRequiredError) {
+      return jsonError(
+        "NEXTBANK_CAPTCHA_REQUIRED",
+        safeErrorMessage(error),
+        400,
+      );
     }
     if (error instanceof NeedsUserActionError) {
       return jsonError("USER_ACTION_REQUIRED", safeErrorMessage(error), 400);
