@@ -2178,7 +2178,14 @@ async function navigateToReadyFrame(
   path: string,
 ) {
   const target = nestedContentFrame(page, frame);
-  if (framePathname(target) !== path) await navigateFrame(target, url);
+  if (framePathname(target) !== path) {
+    try {
+      await navigateFrame(target, url);
+    } catch (error) {
+      if (!/net::ERR_ABORTED/i.test(errorMessage(error))) throw error;
+      logFirstbankStage("overview-navigation-aborted", { path });
+    }
+  }
   return waitForReadyFrameByPath(page, path, target);
 }
 
