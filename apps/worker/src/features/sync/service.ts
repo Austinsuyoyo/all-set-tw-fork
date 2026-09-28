@@ -78,6 +78,7 @@ import {
   recognizeAlphanumericCaptcha,
   recognizeNumericCaptcha,
   recognizeValidateNumber,
+  ValidateNumberOcrError,
 } from "../ocr/service";
 import type { ConnectorId, SyncNewRecordCounts } from "@taiwan-fin-hub/core";
 import {
@@ -1971,15 +1972,21 @@ export async function syncTaishin(
   try {
     result = await createTaishinConnector(
       env.BROWSER,
-      async (imageBytes, digitCount) =>
-        (
-          await recognizeNumericCaptcha(
-            env.AI,
-            imageBytes,
-            "image/jpeg",
-            digitCount,
-          )
-        ).number,
+      async (imageBytes, digitCount) => {
+        try {
+          return (
+            await recognizeNumericCaptcha(
+              env.AI,
+              imageBytes,
+              "image/jpeg",
+              digitCount,
+            )
+          ).number;
+        } catch (error) {
+          if (error instanceof ValidateNumberOcrError) return null;
+          throw error;
+        }
+      },
     ).sync(config, settings.sync_cursor ?? undefined);
   } catch (error) {
     const cleaned = { ...stored };

@@ -162,7 +162,7 @@ export function createTaishinConnector(
   recognizeCaptcha?: (
     imageBytes: ArrayBuffer,
     digitCount: number,
-  ) => Promise<string>,
+  ) => Promise<string | null>,
 ) {
   return {
     id: "taishin" as const,
@@ -354,7 +354,7 @@ async function loginWithOcr(
   recognizeCaptcha: (
     imageBytes: ArrayBuffer,
     digitCount: number,
-  ) => Promise<string>,
+  ) => Promise<string | null>,
 ) {
   for (let attempt = 1; attempt <= TAISHIN_AUTO_LOGIN_ATTEMPTS; attempt += 1) {
     try {
@@ -363,6 +363,17 @@ async function loginWithOcr(
         toArrayBuffer(captcha.bytes),
         captcha.digitCount,
       );
+      if (answer === null) {
+        console.warn(
+          JSON.stringify({
+            event: "taishin_ocr_invalid_result",
+            connectorId: "taishin",
+            attempt,
+            digitCount: captcha.digitCount,
+          }),
+        );
+        continue;
+      }
       assertCaptcha(answer, captcha.digitCount);
       await submitLogin(frame, answer, "automatic", page);
       return frame;
