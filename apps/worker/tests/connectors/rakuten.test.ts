@@ -214,6 +214,48 @@ describe("Rakuten connector parser", () => {
     expect(result.bankBalanceSnapshots).toHaveLength(0);
   });
 
+  it("parses a thousands-separated string balance", () => {
+    const result = parseRakutenData({
+      dashboardPayload: {
+        depositInfo: { acctNo: "0081200000001234", balance: "52,345" },
+      },
+    });
+
+    expect(result.bankBalanceSnapshots).toHaveLength(1);
+    expect(result.bankBalanceSnapshots[0]?.balance).toBe(52345);
+  });
+
+  it("falls through an invalid balance key to a later valid one", () => {
+    const result = parseRakutenData({
+      dashboardPayload: {
+        depositInfo: {
+          acctNo: "0081200000001234",
+          balance: "--",
+          ntdCurrBal: "N/A",
+          acctBal: "52,345",
+        },
+      },
+    });
+
+    expect(result.bankBalanceSnapshots).toHaveLength(1);
+    expect(result.bankBalanceSnapshots[0]?.balance).toBe(52345);
+  });
+
+  it("skips an entry without any valid balance instead of storing 0", () => {
+    const result = parseRakutenData({
+      dashboardPayload: {
+        depositInfo: {
+          acctNo: "0081200000001234",
+          balance: "--",
+          totalBal: "abc",
+        },
+      },
+    });
+
+    expect(result.bankAccounts).toHaveLength(0);
+    expect(result.bankBalanceSnapshots).toHaveLength(0);
+  });
+
   it("refuses to guess between several unmarked accounts without a primary account", () => {
     const result = parseRakutenData({
       dashboardPayload: {

@@ -217,11 +217,18 @@ function isForeignEntry(entry: JsonRecord): boolean {
   );
 }
 
+/** 依序找第一個有效的有限數字餘額（接受千分位字串）；全部無效回傳 undefined。 */
 function balanceOf(entry: JsonRecord): number | undefined {
   for (const key of BALANCE_KEYS) {
-    if (entry[key] !== undefined && entry[key] !== null) {
-      return Number(entry[key]);
-    }
+    const value = entry[key];
+    if (value === undefined || value === null) continue;
+    const text =
+      typeof value === "number"
+        ? String(value)
+        : String(value).replace(/[\s,]/g, "");
+    if (!/^[+-]?\d+(?:\.\d+)?$/.test(text)) continue;
+    const amount = Number(text);
+    if (Number.isFinite(amount)) return amount;
   }
   return undefined;
 }
@@ -290,7 +297,10 @@ function parseDepositPayload(payload: unknown): RakutenDeposit[] {
     const key = comparableAccountNo(accountNo);
     if (seen.has(key)) continue;
     seen.add(key);
-    deposits.push({ accountNo, balance: balanceOf(entry) ?? 0, entry });
+    // 沒有有效餘額就略過，不寫入 0 或 NaN 的錯誤快照。
+    const balance = balanceOf(entry);
+    if (balance === undefined) continue;
+    deposits.push({ accountNo, balance, entry });
   }
   return deposits;
 }
