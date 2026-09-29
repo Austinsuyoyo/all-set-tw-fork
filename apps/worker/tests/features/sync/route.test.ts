@@ -970,11 +970,17 @@ describe("Mega Bank sync routes", () => {
   });
 
   it("maps SMS verification states without exposing the pending session", async () => {
+    const syntheticDevice = {
+      deviceCode: "synthetic-device-code",
+      deviceUKey: "synthetic-device-ukey",
+      deviceSeed: "synthetic-device-seed",
+    };
     mocks.syncMegabank.mockRejectedValueOnce(
       new MegabankOtpRequiredError(
         "兆豐銀行已寄出簡訊驗證碼（簡訊檢核碼 AB12），請於三分鐘內輸入。",
         "pending-session-secret",
         "2026-01-01T00:03:00.000Z",
+        syntheticDevice,
       ),
     );
     const required = await syncRoutes.request(
@@ -1001,6 +1007,7 @@ describe("Mega Bank sync routes", () => {
         "兆豐銀行簡訊驗證碼不正確，請重新輸入。",
         "pending-session-secret",
         "2026-01-01T00:03:00.000Z",
+        syntheticDevice,
       ),
     );
     const invalid = await syncRoutes.request(

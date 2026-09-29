@@ -35,6 +35,11 @@ const credentials = {
   account: "syntheticacct",
   password: "synthetic-only",
 };
+const device = {
+  deviceCode: "synthetic-device-code",
+  deviceUKey: "synthetic-device-ukey",
+  deviceSeed: "synthetic-device-seed",
+};
 
 beforeEach(async () => {
   vi.clearAllMocks();
@@ -67,6 +72,7 @@ describe("syncMegabank OTP handling", () => {
       "兆豐銀行已寄出簡訊驗證碼，請於三分鐘內輸入。",
       "pending-state",
       expiresAt,
+      device,
     );
     mocks.createMegabankConnector.mockReturnValue({
       sync: vi.fn().mockRejectedValue(otpError),
@@ -77,11 +83,15 @@ describe("syncMegabank OTP handling", () => {
     const stored = await storedConfig();
     expect(stored).toEqual({
       ...credentials,
+      ...device,
       pendingSession: "pending-state",
       pendingSessionExpiresAt: expiresAt,
     });
     expect(stored).not.toHaveProperty("captcha");
     expect(stored).not.toHaveProperty("otp");
+    expect(stored.deviceCode).toBe(device.deviceCode);
+    expect(stored.deviceUKey).toBe(device.deviceUKey);
+    expect(stored.deviceSeed).toBe(device.deviceSeed);
   });
 
   it("rethrows MegabankOtpInvalidError and replaces the pendingSession, without storing otp", async () => {
@@ -90,6 +100,7 @@ describe("syncMegabank OTP handling", () => {
       "兆豐銀行簡訊驗證碼錯誤，請重新輸入。",
       "refreshed-pending-state",
       expiresAt,
+      device,
     );
     mocks.createMegabankConnector.mockReturnValue({
       sync: vi.fn().mockRejectedValue(otpError),
@@ -102,11 +113,15 @@ describe("syncMegabank OTP handling", () => {
     const stored = await storedConfig();
     expect(stored).toEqual({
       ...credentials,
+      ...device,
       pendingSession: "refreshed-pending-state",
       pendingSessionExpiresAt: expiresAt,
     });
     expect(stored).not.toHaveProperty("otp");
     expect(stored).not.toHaveProperty("captcha");
+    expect(stored.deviceCode).toBe(device.deviceCode);
+    expect(stored.deviceUKey).toBe(device.deviceUKey);
+    expect(stored.deviceSeed).toBe(device.deviceSeed);
   });
 
   it("wraps a plain MegabankVerificationRequiredError into NeedsUserActionError and clears transient fields", async () => {

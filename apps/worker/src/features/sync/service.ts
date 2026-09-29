@@ -1659,6 +1659,7 @@ export async function syncMegabank(
         awaitingOtp
           ? {
               ...cleaned,
+              ...error.device,
               pendingSession: error.pendingSession,
               pendingSessionExpiresAt: error.pendingSessionExpiresAt,
             }

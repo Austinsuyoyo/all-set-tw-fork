@@ -503,6 +503,14 @@ assert.ok(otpRequired);
 assert.match(otpRequired.message, /簡訊檢核碼 AB12/);
 assert.equal(otpRequired.message.includes(credentials.password), false);
 assert.equal(JSON.parse(otpRequired.pendingSession).authenticated, true);
+// 錯誤要帶出待驗證登入所用的虛擬裝置，service 才能保存。
+const requiredSessionState = JSON.parse(otpRequired.pendingSession);
+assert.deepEqual(otpRequired.device, {
+  deviceCode: requiredSessionState.deviceCode,
+  deviceUKey: requiredSessionState.deviceUKey,
+  deviceSeed: requiredSessionState.seed,
+});
+assert.ok(otpRequired.device.deviceCode);
 assert.ok(Date.parse(otpRequired.pendingSessionExpiresAt) > Date.now());
 assert.equal(logoutCount(), logoutsBefore, "等待簡訊驗證碼時不得登出");
 
@@ -527,6 +535,7 @@ assert.equal(
   otpInvalid.pendingSessionExpiresAt,
   otpRequired.pendingSessionExpiresAt,
 );
+assert.deepEqual(otpInvalid.device, otpRequired.device);
 assert.equal(logoutCount(), logoutsBefore);
 
 // 驗證碼正確：接續同一個登入抓資料，結束後登出。
@@ -586,6 +595,44 @@ assert.equal(
   verifyCodeRequests,
 );
 loginGate = {};
+
+// 回歸：上一輪留下的已登入待驗證工作階段（沒有輸入簡訊驗證碼）不得當成圖形驗證碼
+// session 重用；要先登出，再重新取得圖形驗證碼（有辨識器時自動辨識）並正常登入。
+const recognizingConnector = createMegabankConnector(
+  fetcher,
+  async () => "12345",
+  { allowOtpRequest: true },
+);
+assert.equal(
+  JSON.parse(otpRequired.pendingSession).authenticated,
+  true,
+  "前置條件：待驗證工作階段仍是已登入狀態",
+);
+assert.ok(Date.parse(otpRequired.pendingSessionExpiresAt) > Date.now());
+const staleRequestStart = requests.length;
+logoutsBefore = logoutCount();
+const staleResult = await recognizingConnector.sync({
+  ...credentials,
+  pendingSession: otpRequired.pendingSession,
+  pendingSessionExpiresAt: otpRequired.pendingSessionExpiresAt,
+});
+assert.equal(staleResult.bankAccounts?.length, 2);
+const staleRequests = requests.slice(staleRequestStart);
+const staleLogoutIndex = staleRequests.indexOf("/fco/fco02011/logout");
+const staleCaptchaIndex = staleRequests.indexOf("/fco/fco00001/captcha");
+assert.ok(staleLogoutIndex >= 0, "舊的已登入工作階段必須先登出");
+assert.ok(staleCaptchaIndex >= 0, "必須重新取得圖形驗證碼");
+assert.ok(
+  staleLogoutIndex < staleCaptchaIndex,
+  "先登出舊工作階段再取圖形驗證碼",
+);
+assert.equal(
+  staleRequests.filter((resource) => resource === "/fco/fco00001/captcha")
+    .length,
+  1,
+);
+assert.equal(logoutCount(), logoutsBefore + 2, "舊工作階段與新登入各登出一次");
+assert.equal(requests.at(-1), "/fco/fco02011/logout");
 
 // 已保存的虛擬裝置：取得驗證碼與後續登入都沿用同一組識別。
 assert.ok(challenge.device.deviceCode);

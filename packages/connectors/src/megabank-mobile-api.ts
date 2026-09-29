@@ -70,6 +70,8 @@ export class MegabankOtpRequiredError extends MegabankVerificationRequiredError 
     message: string,
     readonly pendingSession: string,
     readonly pendingSessionExpiresAt: string,
+    /** 待驗證登入所用的虛擬裝置；自動辨識驗證碼路徑也要保存，簡訊驗證才只需一次。 */
+    readonly device: MegabankDevice,
   ) {
     super(message);
     this.name = "MegabankOtpRequiredError";
@@ -80,6 +82,7 @@ export class MegabankOtpInvalidError extends MegabankVerificationRequiredError {
     message: string,
     readonly pendingSession: string,
     readonly pendingSessionExpiresAt: string,
+    readonly device: MegabankDevice,
   ) {
     super(message);
     this.name = "MegabankOtpInvalidError";
@@ -189,11 +192,14 @@ export function createMegabankConnector(
           pending.expiresAt,
         );
       }
-      // 上一輪等待簡訊驗證碼的登入沒有完成時，先釋放再重新登入。
-      if (pending?.session.isAuthenticated()) await pending.session.logout();
+      // 上一輪等待簡訊驗證碼的登入沒有完成時，先釋放再重新登入；logout 會清掉登入狀態，
+      // 所以要先記下原本是否已登入，已登入過的工作階段不能再當成驗證碼 session 重用。
+      const pendingWasAuthenticated =
+        pending?.session.isAuthenticated() ?? false;
+      if (pendingWasAuthenticated) await pending?.session.logout();
       let session: MegabankSession;
       let captcha = config.captcha;
-      if (pending?.active && !pending.session.isAuthenticated()) {
+      if (pending?.active && !pendingWasAuthenticated) {
         session = pending.session;
       } else {
         const challenge = await prepareMegabankCaptcha(config, fetcher);
@@ -236,6 +242,7 @@ export function createMegabankConnector(
             `兆豐銀行已寄出簡訊驗證碼${checkCode ? `（簡訊檢核碼 ${checkCode}）` : ""}，請於三分鐘內輸入。`,
             session.serialize(),
             new Date(Date.now() + OTP_SESSION_TTL_MS).toISOString(),
+            session.device(),
           );
         }
         return await fetchMegabankData(session);
@@ -275,6 +282,7 @@ async function completeVerifiedSync(
         "兆豐銀行簡訊驗證碼不正確，請重新輸入。",
         session.serialize(),
         expiresAt,
+        session.device(),
       );
     }
     return await fetchMegabankData(session);
