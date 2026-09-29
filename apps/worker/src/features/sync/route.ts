@@ -8,6 +8,8 @@ import {
   TdccConnectionError,
   TdccVerificationRequiredError,
   MegabankConnectionError,
+  MegabankOtpInvalidError,
+  MegabankOtpRequiredError,
   MegabankProtocolError,
   MegabankVerificationRequiredError,
 } from "@taiwan-fin-hub/connectors";
@@ -119,6 +121,10 @@ const megabankSyncBodySchema = z.object({
   captcha: z
     .string()
     .regex(/^\d{5}$/)
+    .optional(),
+  otp: z
+    .string()
+    .regex(/^\d{4,8}$/)
     .optional(),
 });
 
@@ -763,6 +769,16 @@ async function syncRouteResponse(
         safeErrorMessage(error),
         400,
       );
+    }
+    if (error instanceof MegabankOtpRequiredError) {
+      return jsonError(
+        "MEGABANK_SMS_OTP_REQUIRED",
+        safeErrorMessage(error),
+        400,
+      );
+    }
+    if (error instanceof MegabankOtpInvalidError) {
+      return jsonError("MEGABANK_OTP_INVALID", safeErrorMessage(error), 400);
     }
     if (error instanceof NeedsUserActionError) {
       return jsonError("USER_ACTION_REQUIRED", safeErrorMessage(error), 400);

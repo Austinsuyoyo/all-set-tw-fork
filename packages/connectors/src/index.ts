@@ -218,6 +218,8 @@ export type {
 export {
   createMegabankConnector,
   MegabankConnectionError,
+  MegabankOtpInvalidError,
+  MegabankOtpRequiredError,
   MegabankProtocolError,
   MegabankVerificationRequiredError,
   prepareMegabankCaptcha,

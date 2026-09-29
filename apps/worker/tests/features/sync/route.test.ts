@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CtbcConnectionError,
+  MegabankOtpInvalidError,
+  MegabankOtpRequiredError,
   ObankConnectionError,
   SkbankConnectionError,
 } from "@taiwan-fin-hub/connectors";
@@ -939,6 +941,81 @@ describe("Mega Bank sync routes", () => {
       env,
     );
     expect(invalid.status).toBe(400);
+  });
+
+  it("dispatches the SMS verification code and rejects malformed codes", async () => {
+    const valid = await syncRoutes.request(
+      "/connectors/megabank/sync",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ otp: "654321" }),
+      },
+      env,
+    );
+    expect(valid.status).toBe(200);
+    expect(mocks.syncMegabank).toHaveBeenCalledWith(env, "manual", {
+      otp: "654321",
+    });
+    const invalid = await syncRoutes.request(
+      "/connectors/megabank/sync",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ otp: "12a456" }),
+      },
+      env,
+    );
+    expect(invalid.status).toBe(400);
+  });
+
+  it("maps SMS verification states without exposing the pending session", async () => {
+    mocks.syncMegabank.mockRejectedValueOnce(
+      new MegabankOtpRequiredError(
+        "兆豐銀行已寄出簡訊驗證碼（簡訊檢核碼 AB12），請於三分鐘內輸入。",
+        "pending-session-secret",
+        "2026-01-01T00:03:00.000Z",
+      ),
+    );
+    const required = await syncRoutes.request(
+      "/connectors/megabank/sync",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ captcha: "12345" }),
+      },
+      env,
+    );
+    expect(required.status).toBe(400);
+    const requiredBody = await required.text();
+    expect(JSON.parse(requiredBody)).toMatchObject({
+      error: {
+        code: "MEGABANK_SMS_OTP_REQUIRED",
+        message: expect.stringContaining("AB12"),
+      },
+    });
+    expect(requiredBody).not.toContain("pending-session-secret");
+
+    mocks.syncMegabank.mockRejectedValueOnce(
+      new MegabankOtpInvalidError(
+        "兆豐銀行簡訊驗證碼不正確，請重新輸入。",
+        "pending-session-secret",
+        "2026-01-01T00:03:00.000Z",
+      ),
+    );
+    const invalid = await syncRoutes.request(
+      "/connectors/megabank/sync",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ otp: "654321" }),
+      },
+      env,
+    );
+    expect(invalid.status).toBe(400);
+    await expect(invalid.json()).resolves.toMatchObject({
+      error: { code: "MEGABANK_OTP_INVALID" },
+    });
   });
 });
 
