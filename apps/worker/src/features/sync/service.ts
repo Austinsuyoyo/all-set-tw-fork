@@ -22,6 +22,8 @@ import {
   ObankProtocolError,
   ObankVerificationRequiredError,
   createMegabankConnector,
+  MegabankOtpInvalidError,
+  MegabankOtpRequiredError,
   MegabankProtocolError,
   MegabankVerificationRequiredError,
   parseCathaybkConfig,
@@ -224,6 +226,7 @@ export type ObankSyncOverrides = {
 
 export type MegabankSyncOverrides = {
   captcha?: string;
+  otp?: string;
 };
 
 export type FirstbankSyncOverrides = {
@@ -553,6 +556,8 @@ export async function prepareMegabankCaptchaSession(env: Env) {
       await encryptJson(
         {
           ...stored,
+          // 首次取得驗證碼時固定虛擬裝置，之後登入都沿用，簡訊驗證才可能只需一次。
+          ...prepared.device,
           pendingSession: prepared.pendingSession,
           pendingSessionExpiresAt: prepared.pendingSessionExpiresAt,
         },
@@ -1650,6 +1655,12 @@ export function obankStoredConfigAfterSync(stored: Record<string, unknown>) {
   return cleaned;
 }
 
+function megabankStoredConfigAfterSync(stored: Record<string, unknown>) {
+  const cleaned = obankStoredConfigAfterSync(stored);
+  delete cleaned.otp;
+  return cleaned;
+}
+
 export async function syncMegabank(
   env: Env,
   trigger: SyncTrigger,
@@ -1673,7 +1684,7 @@ export async function syncMegabank(
   try {
     const connector = createMegabankConnector(
       globalThis.fetch.bind(globalThis),
-      overrides.captcha
+      overrides.captcha || overrides.otp
         ? undefined
         : async (imageBytes, contentType) => {
             try {
@@ -1691,16 +1702,32 @@ export async function syncMegabank(
               );
             }
           },
+      // 只有使用者在場的手動同步才請銀行寄簡訊驗證碼，排程不觸發。
+      { allowOtpRequest: trigger === "manual" },
     );
     result = await connector.sync(config, settings.sync_cursor ?? undefined);
   } catch (error) {
-    const cleaned = obankStoredConfigAfterSync(stored);
+    const awaitingOtp =
+      error instanceof MegabankOtpRequiredError ||
+      error instanceof MegabankOtpInvalidError;
+    const cleaned = megabankStoredConfigAfterSync(stored);
     await updateConnectorEncryptedConfigIfCurrent(
       env.DB,
       connectorId,
       settings.encrypted_config,
-      await encryptJson(cleaned, configEncryptionKey(env)),
+      await encryptJson(
+        awaitingOtp
+          ? {
+              ...cleaned,
+              ...error.device,
+              pendingSession: error.pendingSession,
+              pendingSessionExpiresAt: error.pendingSessionExpiresAt,
+            }
+          : cleaned,
+        configEncryptionKey(env),
+      ),
     );
+    if (awaitingOtp) throw error;
     if (error instanceof MegabankVerificationRequiredError) {
       throw new NeedsUserActionError(error.message);
     }
@@ -1727,7 +1754,9 @@ export async function syncMegabank(
       creditCardBillRecord(connectorId, bill, now),
     ),
   ];
-  const cleanedConfig = parseMegabankConfig(obankStoredConfigAfterSync(config));
+  const cleanedConfig = parseMegabankConfig(
+    megabankStoredConfigAfterSync(config),
+  );
   if (
     (await requireConnectorSettings(env.DB, connectorId)).encrypted_config !==
     settings.encrypted_config
@@ -2975,7 +3004,8 @@ export function isUserActionError(error: unknown) {
     error instanceof TaishinVerificationRequiredError ||
     error instanceof HncbVerificationRequiredError ||
     error instanceof RakutenVerificationRequiredError ||
-    error instanceof KgibankVerificationRequiredError
+    error instanceof KgibankVerificationRequiredError ||
+    error instanceof MegabankVerificationRequiredError
   )
     return true;
   const message = error instanceof Error ? error.message : String(error);
