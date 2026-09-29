@@ -596,6 +596,26 @@ export const connectorCatalog = {
       "captcha",
     ],
   },
+  rakuten: {
+    id: "rakuten",
+    title: "樂天國際銀行",
+    description: "臺幣活存帳戶與每日餘額",
+    connectionMode: "browser_captcha_session",
+    scopes: ["all"],
+    capabilities: ["bank_account", "bank_balance_snapshot"],
+    publicFields: [],
+    credentialFields: ["userId", "account", "password"],
+    secretStateFields: [
+      "browserSessionId",
+      "browserSessionExpiresAt",
+      "captcha",
+    ],
+    resetOnCredentialChangeFields: [
+      "browserSessionId",
+      "browserSessionExpiresAt",
+      "captcha",
+    ],
+  },
   kgibank: {
     id: "kgibank",
     title: "凱基銀行",

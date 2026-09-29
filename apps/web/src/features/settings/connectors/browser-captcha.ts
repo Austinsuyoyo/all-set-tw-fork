@@ -10,6 +10,13 @@ const INVALIDATED_CAPTCHA_SESSION_CODES = new Set([
   "MEGABANK_CONNECTION_FAILED",
 ]);
 
+/** 伺服器判定自動辨識驗證碼失敗，應改走人工驗證碼流程。 */
+export function isManualCaptchaRequired(error: unknown) {
+  return (
+    error instanceof ApiRequestError && error.code === "MANUAL_CAPTCHA_REQUIRED"
+  );
+}
+
 export function browserCaptchaFailure(error: unknown) {
   const message = error instanceof Error ? error.message : "驗證或同步失敗";
   const sessionInvalidated =

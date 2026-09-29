@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { ApiRequestError } from "@/shared/api/client";
-import { browserCaptchaFailure } from "./browser-captcha";
+import {
+  browserCaptchaFailure,
+  isManualCaptchaRequired,
+} from "./browser-captcha";
 
 describe("browserCaptchaFailure", () => {
   it("invalidates a CAPTCHA image after the server closes its browser session", () => {
@@ -86,5 +89,23 @@ describe("browserCaptchaFailure", () => {
       message,
       sessionInvalidated: false,
     });
+  });
+});
+
+describe("isManualCaptchaRequired", () => {
+  it("only matches the server's manual CAPTCHA fallback code", () => {
+    expect(
+      isManualCaptchaRequired(
+        new ApiRequestError("MANUAL_CAPTCHA_REQUIRED", "請改用人工驗證。", 400),
+      ),
+    ).toBe(true);
+    expect(
+      isManualCaptchaRequired(
+        new ApiRequestError("USER_ACTION_REQUIRED", "密碼錯誤。", 400),
+      ),
+    ).toBe(false);
+    expect(isManualCaptchaRequired(new Error("MANUAL_CAPTCHA_REQUIRED"))).toBe(
+      false,
+    );
   });
 });

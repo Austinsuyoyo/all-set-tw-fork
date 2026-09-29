@@ -38,6 +38,7 @@
   import { formatDateTime } from "@/shared/format/financial";
   import {
     browserCaptchaFailure,
+    isManualCaptchaRequired,
     needsNextbankCaptcha,
   } from "./browser-captcha";
   import { shouldEnableScheduleAfterFirstSync } from "./schedule-after-sync";
@@ -108,6 +109,7 @@
       connectorId === "nextbank" ||
       connectorId === "firstbank" ||
       connectorId === "hncb" ||
+      connectorId === "rakuten" ||
       connectorId === "kgibank" ||
       connectorId === "megabank",
   );
@@ -315,7 +317,12 @@
       if (handleTdccVerificationRequired(e)) return;
       if (handleCathayVerificationRequired(e)) return;
       error = e instanceof Error ? e.message : "同步失敗";
-      if (needsNextbankCaptcha(connectorId, e)) $prepareBrowserBank.mutate();
+      if (browserBank && isManualCaptchaRequired(e)) {
+        // 自動辨識失敗：直接取得人工驗證碼，不再重試自動登入
+        $prepareBrowserBank.mutate();
+      } else if (needsNextbankCaptcha(connectorId, e)) {
+        $prepareBrowserBank.mutate();
+      }
       if (browserBank)
         qc.invalidateQueries({
           queryKey: queryKeys.connectorSettings(connectorId),
@@ -1054,7 +1061,9 @@
                   ? "凱基"
                   : connectorId === "megabank"
                     ? "兆豐"
-                    : "永豐"}
+                    : connectorId === "rakuten"
+                      ? "樂天"
+                      : "永豐"}
       bind:captcha={bankCaptcha}
       captchaImage={bankCaptchaImage}
       digitCount={bankCaptchaDigitCount}
@@ -1562,6 +1571,8 @@
                   ? "首次驗證會加入信任裝置；信任失效時需在手動同步中重新取得驗證碼。"
                   : connectorId === "megabank"
                     ? "兆豐同步直接使用 App API，以一般帳密登入並辨識五位數圖形驗證碼；也可改用人工輸入。"
-                    : "輸入完帳號密碼後，請先按「儲存設定」，再按「同步」。"}
+                    : connectorId === "rakuten"
+                      ? "樂天網銀驗證碼會先以 Workers AI 自動辨識，失敗時改由人工輸入；每次同步都重新登入，結束時登出，不保留 session。"
+                      : "輸入完帳號密碼後，請先按「儲存設定」，再按「同步」。"}
   </p>
 </Card>
