@@ -31,6 +31,11 @@ import {
   KgibankVerificationRequiredError,
 } from "../../connectors/kgibank";
 import {
+  RakutenBrowserCapacityError,
+  RakutenConnectionError,
+  RakutenVerificationRequiredError,
+} from "../../connectors/rakuten";
+import {
   CathayOtpChannelRequiredError,
   CathayOtpInvalidError,
   CathayOtpRequiredError,
@@ -47,6 +52,7 @@ import { honoFactory } from "../../platform/hono";
 import { jsonError } from "../../platform/http";
 import { validationHook } from "../../platform/validation";
 import {
+  ManualCaptchaRequiredError,
   NeedsUserActionError,
   NextbankCaptchaRequiredError,
   safeErrorMessage,
@@ -86,6 +92,13 @@ const hncbSyncBodySchema = z.object({
   captcha: z
     .string()
     .regex(/^\d{4,8}$/)
+    .optional(),
+});
+
+const rakutenSyncBodySchema = z.object({
+  captcha: z
+    .string()
+    .regex(/^[A-Za-z0-9]{4}$/)
     .optional(),
 });
 
@@ -412,6 +425,65 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
         c,
         withManualSyncLock(c.env, "hncb", SYNC_SCOPE_ALL, () =>
           runConnectorSync(c.env, "hncb", "manual", SYNC_SCOPE_ALL, overrides),
+        ),
+      );
+    },
+  );
+
+  api.post("/connectors/rakuten/captcha", async (c) => {
+    try {
+      return c.json(await prepareConnectorChallenge(c.env, "rakuten"));
+    } catch (error) {
+      if (error instanceof SyncAlreadyRunningError) {
+        return jsonError(
+          "SYNC_ALREADY_RUNNING",
+          "樂天國際銀行已有驗證或同步作業正在進行。",
+          409,
+        );
+      }
+      if (error instanceof BrowserRunCapacityError)
+        return browserRunBusyResponse(error);
+      if (error instanceof RakutenBrowserCapacityError) {
+        const response = jsonError("RAKUTEN_BROWSER_BUSY", error.message, 429);
+        response.headers.set("Retry-After", String(error.retryAfterSeconds));
+        return response;
+      }
+      if (error instanceof RakutenConnectionError) {
+        return jsonError(
+          "RAKUTEN_CAPTCHA_FAILED",
+          safeErrorMessage(error),
+          502,
+        );
+      }
+      if (
+        error instanceof NeedsUserActionError ||
+        error instanceof RakutenVerificationRequiredError
+      ) {
+        return jsonError("USER_ACTION_REQUIRED", error.message, 400);
+      }
+      return jsonError("RAKUTEN_CAPTCHA_FAILED", safeErrorMessage(error), 502);
+    }
+  });
+
+  api.post(
+    "/connectors/rakuten/sync",
+    zValidator(
+      "json",
+      rakutenSyncBodySchema,
+      validationHook("INVALID_REQUEST", "Rakuten sync options are invalid."),
+    ),
+    async (c) => {
+      const overrides = c.req.valid("json");
+      return syncRouteResponse(
+        c,
+        withManualSyncLock(c.env, "rakuten", SYNC_SCOPE_ALL, () =>
+          runConnectorSync(
+            c.env,
+            "rakuten",
+            "manual",
+            SYNC_SCOPE_ALL,
+            overrides,
+          ),
         ),
       );
     },
@@ -757,6 +829,9 @@ async function syncRouteResponse(
     if (error instanceof TdccConnectionError) {
       return jsonError("TDCC_CONNECTION_FAILED", safeErrorMessage(error), 400);
     }
+    if (error instanceof ManualCaptchaRequiredError) {
+      return jsonError("MANUAL_CAPTCHA_REQUIRED", safeErrorMessage(error), 400);
+    }
     if (error instanceof NextbankCaptchaRequiredError) {
       return jsonError(
         "NEXTBANK_CAPTCHA_REQUIRED",
@@ -829,6 +904,18 @@ async function syncRouteResponse(
       error instanceof ObankProtocolError
     ) {
       return jsonError("OBANK_CONNECTION_FAILED", safeErrorMessage(error), 502);
+    }
+    if (error instanceof RakutenBrowserCapacityError) {
+      const response = jsonError("RAKUTEN_BROWSER_BUSY", error.message, 429);
+      response.headers.set("Retry-After", String(error.retryAfterSeconds));
+      return response;
+    }
+    if (error instanceof RakutenConnectionError) {
+      return jsonError(
+        "RAKUTEN_CONNECTION_FAILED",
+        safeErrorMessage(error),
+        502,
+      );
     }
     if (error instanceof KgibankBrowserCapacityError) {
       const response = jsonError("KGIBANK_BROWSER_BUSY", error.message, 429);
