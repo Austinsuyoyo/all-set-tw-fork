@@ -208,6 +208,50 @@ function renderMegabankPanel(post: ReturnType<typeof vi.fn>) {
   return { ...result, api };
 }
 
+function renderRakutenPanel(post: ReturnType<typeof vi.fn>) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: 30_000 } },
+  });
+  const api = {
+    get: vi.fn((path: string) => {
+      if (path === "/api/sync-jobs") {
+        return Promise.resolve([
+          syncJob({ id: "rakuten:all", connectorId: "rakuten" }),
+        ]);
+      }
+      if (path === "/api/connectors/rakuten/settings") {
+        return Promise.resolve({
+          connectorId: "rakuten",
+          configured: true,
+          credentialsComplete: true,
+          sessionAvailable: false,
+          updatedAt: "2026-09-27T00:00:00.000Z",
+        });
+      }
+      return Promise.resolve({});
+    }),
+    post,
+    patch: vi.fn(),
+  } as unknown as ApiClient;
+  const result = render(
+    ConnectorPanel,
+    {
+      props: {
+        api,
+        connectorId: "rakuten",
+        demoMode: false,
+        title: "樂天國際銀行",
+        fields: connectorFields.rakuten as ConnectorField[],
+      },
+    },
+    {
+      wrapper: QueryClientProvider,
+      wrapperProps: { client: queryClient },
+    },
+  );
+  return { ...result, api };
+}
+
 function renderNextbankPanel() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: 30_000 } },
@@ -272,6 +316,64 @@ describe("ConnectorPanel", () => {
     expect(getByRole("button", { name: "人工輸入驗證碼" })).toBeEnabled();
     expect(api.post).not.toHaveBeenCalled();
     expect(api.patch).not.toHaveBeenCalled();
+  });
+
+  it("switches Rakuten to a manual CAPTCHA when automatic recognition fails", async () => {
+    const post = vi.fn((path: string) => {
+      if (path === "/api/connectors/rakuten/sync") {
+        return Promise.reject(
+          new ApiRequestError(
+            "MANUAL_CAPTCHA_REQUIRED",
+            "樂天驗證碼自動辨識連續失敗 3 次，請改用人工驗證。",
+            400,
+          ),
+        );
+      }
+      if (path === "/api/connectors/rakuten/captcha") {
+        return Promise.resolve({
+          captchaImage: "data:image/png;base64,AQID",
+          expiresAt: "2026-09-27T00:02:00.000Z",
+          captchaLength: 4,
+          captchaKind: "alphanumeric",
+        });
+      }
+      return Promise.resolve({});
+    });
+    const { findByAltText, findByRole } = renderRakutenPanel(post);
+
+    await fireEvent.click(
+      await findByRole("button", { name: "自動驗證並同步" }),
+    );
+
+    expect(await findByAltText("樂天圖形驗證碼")).toBeInTheDocument();
+    expect(post.mock.calls.map(([path]) => path)).toEqual([
+      "/api/connectors/rakuten/sync",
+      "/api/connectors/rakuten/captcha",
+    ]);
+  });
+
+  it("does not open a manual CAPTCHA for other Rakuten user-action errors", async () => {
+    const post = vi.fn((path: string) =>
+      path === "/api/connectors/rakuten/sync"
+        ? Promise.reject(
+            new ApiRequestError(
+              "USER_ACTION_REQUIRED",
+              "樂天銀行身分證字號、使用者代號或密碼錯誤。",
+              400,
+            ),
+          )
+        : Promise.resolve({}),
+    );
+    const { findByRole, findByText } = renderRakutenPanel(post);
+
+    await fireEvent.click(
+      await findByRole("button", { name: "自動驗證並同步" }),
+    );
+
+    expect(
+      await findByText(/樂天銀行身分證字號、使用者代號或密碼錯誤。/),
+    ).toBeInTheDocument();
+    expect(post).toHaveBeenCalledTimes(1);
   });
 
   it("keeps connector credential fields from inviting browser autofill", async () => {

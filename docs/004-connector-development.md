@@ -356,6 +356,20 @@ Migration `0043_merge_legacy_invoice_duplicates.sql` 以相同發票號碼整併
 - 凱基連續三次密碼錯誤會停權。`connect/token` 被拒絕或頁面顯示密碼／代號錯誤時一律標記 `needs_user_action` 並清除驗證狀態，不得重試；只有尚未送出帳密且頁面明確顯示驗證碼錯誤時才視為驗證碼錯誤。
 - 凱基資料由登入後頁面自身 API 請求的授權 header（`authorization`、`ocp-apim-subscription-key`、`x-c-*`）於頁面內呼叫 `TwdDemandDepositDetail/AcctQuery` 與 `TxnQuery`；交易 `sourceId` 以帳號、秒精度交易時間、金額與交易後餘額雜湊，不依賴 `recNo`。
 
+### 樂天國際銀行
+
+- 樂天每次同步都需要 4 位英數圖形驗證碼，並重新以 Browser Run 登入（`browser_captcha_session`，但不復用 session）。手動與排程同步預設以 Workers AI 自動辨識，只有「驗證碼錯誤」（含辨識結果長度或字元不符）會重試，最多三次；連續失敗、辨識服務不可用或剩餘時間不足時拋出 `ManualCaptchaRequiredError`（HTTP 400 `MANUAL_CAPTCHA_REQUIRED`），標記 `needs_user_action`，前端接著呼叫 `prepareChallenge` 取得人工驗證碼。人工驗證碼有效時優先使用，逾時則退回自動辨識。
+- 目前只同步臺幣活存帳戶與每日餘額快照，不同步交易明細。登入後由頁面在載入前注入的攔截器讀取網頁自己解密後的首頁 API（`CHMQU0001`）回應，取不到時才改讀「臺幣存款」頁面文字。存款採白名單：只接受主帳號或明確標示為樂天（銀行代碼 826）的臺幣帳戶，他行、外幣與轉入對手帳號一律排除；解析不到存款視為頁面結構改變並整次失敗。
+- 餘額快照 `sourceId` 帶上 UTC 日期（`snapshot:rakuten:<帳號>:TWD:YYYY-MM-DD`），每天保留一筆，同一天多次同步只覆寫當天那筆。
+- 同步逾時上限為 55 秒；每次同步結束一律點頁首「登出」並確認，再關閉瀏覽器，登出失敗只記錄事件，不影響同步結果。
+- 安全規則：
+  - 不重用銀行 session／cookie。`browserSessionId`、`captcha` 是一次性 challenge state，成功或失敗後都清除；設定 schema 不得新增 `sessionCookies`、`sessionCreatedAt` 之類的欄位。
+  - 只有「驗證碼錯誤」可以自動重試。帳密錯誤、重複登入、新裝置驗證（簡訊／Email／晶片卡綁定）、系統維護與結果不明一律立即中止，避免帳號被鎖。
+  - 遇到「其他裝置已登入」等確認視窗絕不點擊接管或強制登入；原生對話框只接受 `alert`，`confirm`／`prompt`／`beforeunload` 一律 dismiss。
+  - log 不得包含帳號、餘額、姓名、頁面內容、API 回應內容或帳密，只記錄事件名稱、欄位名稱、數量、長度、狀態碼與去掉 query 的路徑。
+  - 每次同步結束一律 `browser.close()`；只有 prepare（人工驗證碼）階段可以 `disconnect` 保留瀏覽器。
+  - 測試與 fixture 只使用合成帳號與金額。
+
 ### 兆豐銀行
 
 - 使用 App 2.5.19 的 MobileFirst API：OAuth client credentials、`/main/init`、App 初始化、五位數字驗證碼、E2EE RSA／TripleDES 帳密登入。一般登入不要求快速登入或裝置綁定。本機與 Cloudflare Workers 線上皆已完成實際同步（含異地登入簡訊驗證）。
