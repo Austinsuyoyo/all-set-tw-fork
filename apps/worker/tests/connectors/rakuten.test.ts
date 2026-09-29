@@ -256,6 +256,23 @@ describe("Rakuten connector parser", () => {
     expect(result.bankBalanceSnapshots).toHaveLength(0);
   });
 
+  it("uses a later valid candidate when the same account's first candidate has no valid balance", () => {
+    const result = parseRakutenData({
+      dashboardPayload: {
+        depositInfo: {
+          depAccounts: [
+            { acctNo: "0010123456789012", bankNo: "826", balance: "--" },
+            { acctNo: "0010123456789012", bankNo: "826", balance: "52,345" },
+          ],
+        },
+      },
+    });
+
+    expect(result.bankAccounts).toHaveLength(1);
+    expect(result.bankBalanceSnapshots).toHaveLength(1);
+    expect(result.bankBalanceSnapshots[0]?.balance).toBe(52345);
+  });
+
   it("refuses to guess between several unmarked accounts without a primary account", () => {
     const result = parseRakutenData({
       dashboardPayload: {

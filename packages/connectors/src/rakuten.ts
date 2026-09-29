@@ -296,10 +296,11 @@ function parseDepositPayload(payload: unknown): RakutenDeposit[] {
     const accountNo = accountNoOf(entry.acctNo);
     const key = comparableAccountNo(accountNo);
     if (seen.has(key)) continue;
-    seen.add(key);
-    // 沒有有效餘額就略過，不寫入 0 或 NaN 的錯誤快照。
+    // 沒有有效餘額就略過，不寫入 0 或 NaN 的錯誤快照；確認有效後才標記已處理，
+    // 同一帳號後面若還有有效的候選資料仍會採用。
     const balance = balanceOf(entry);
     if (balance === undefined) continue;
+    seen.add(key);
     deposits.push({ accountNo, balance, entry });
   }
   return deposits;
