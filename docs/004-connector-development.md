@@ -248,7 +248,9 @@ Migration `0043_merge_legacy_invoice_duplicates.sql` 以相同發票號碼整併
 
 永豐信用卡使用 SinoCard `accounting/accountinginfo` 的 `BillAmounts` 取得各幣別本期帳務，
 以 `CURRBAL` 保存應繳總額、`DUEAMT` 保存最低應繳、`TotalPaymentAmt` 保存本期累計已繳款。
-餘額快照使用應繳總額扣除同幣別已繳款，最低為零；缺少已繳款金額時不建立該筆快照。
+應繳總額保留原始正負號，允許退款或溢繳形成的負帳單。餘額快照使用同幣別已繳款減去應繳總額，
+負值為欠款，正值為溢繳餘額；餘額非負時標記無需繳款。缺少已繳款金額時不建立該筆帳務快照，
+台幣總覽的負應繳金額仍保留為正餘額，不取絕對值或歸零。
 結帳日與繳款期限分別取自 `BaseData.STMTDATE`、`BaseData.DUEDATE`；保留既有台幣歷史帳單查詢。
 外幣未列於本期 `BillAmounts` 時，使用銀行本次 `OutstandingDetail.SubTotal` 小計作為未出帳負債快照，
 不建立帳單、不填入繳款期限；不得累加本機歷史交易替代本次小計。資產頁對未知信用卡餘額顯示
