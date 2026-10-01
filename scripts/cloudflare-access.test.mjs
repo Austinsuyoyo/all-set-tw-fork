@@ -455,22 +455,42 @@ test("retrying a failed verification deployment rediscovers GUI Access and prese
 });
 
 test("completed legacy deployments do not require Access permissions for updates", async () => {
-  const api = cloudflare({ deniedPath: "/workers/subdomain" });
-  const runner = deploymentRunner({
-    initialSecrets: { ...accessSecrets, ...vapidSecrets },
-  });
-  await deploy(
+  for (const argumentsToDeploy of [
     [],
-    options(api, runner, {
-      environment: { ...environment, CLOUDFLARE_API_TOKEN: undefined },
-    }),
-  );
-  assert.equal(api.state.calls.length, 0);
-  assert.equal(runner.uploads.length, 1);
-  assert.deepEqual(runner.runtimeSecrets, {
-    ...accessSecrets,
-    ...vapidSecrets,
-  });
+    ["--name=ignored-worker", "--env=production"],
+  ]) {
+    const api = cloudflare({ deniedPath: "/workers/subdomain" });
+    const initialSecrets = { ...accessSecrets, ...vapidSecrets };
+    const runner = deploymentRunner({ initialSecrets });
+    await deploy(
+      argumentsToDeploy,
+      options(api, runner, {
+        environment: {
+          ...environment,
+          CLOUDFLARE_API_TOKEN: undefined,
+          WRANGLER_CI_OVERRIDE_NAME: workerName,
+        },
+        readConfig: async () => ({ ...config, name: "all-set-tw" }),
+        run: async (args) => {
+          if (args[0] === "secret") {
+            assert.deepEqual(args, [
+              "secret",
+              "list",
+              "--format",
+              "json",
+              "--name",
+              workerName,
+            ]);
+          }
+          return runner.run(args);
+        },
+      }),
+    );
+    assert.equal(api.state.calls.length, 0);
+    assert.equal(runner.uploads.length, 1);
+    assert.equal(runner.uploads[0].file, null);
+    assert.deepEqual(runner.runtimeSecrets, initialSecrets);
+  }
 });
 
 test("explicit manual credentials are preserved and incomplete credentials are reported", async () => {
