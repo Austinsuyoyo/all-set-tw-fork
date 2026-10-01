@@ -36,7 +36,9 @@ Cloudflare 會先建立 Worker，再於背景執行 build。GUI 會建立登入�
 
 `TEAM_DOMAIN` 與 `POLICY_AUD` 可以存入私人 `.dev.vars` 作本機測試，但 `.dev.vars` 不會自動同步到正式 Worker；首次建立 Access Application 時，仍需先取得該帳戶的 Team domain 與新產生的 AUD。
 
-Deploy to Cloudflare 會建立部署用 repository、D1 並設定 Workers Builds。本專案的 build 與 deploy script 也會檢查排程同步所需的 `taiwan-fin-hub-sync` Queue，缺少時自動建立；部署 script 會保留既有 VAPID 金鑰，初次部署則自動產生。
+Deploy to Cloudflare 會建立部署用 repository、D1 並設定 Workers Builds。本專案的 build 與 deploy script 會依 `wrangler.toml` 檢查 Queue，缺少時自動建立。同名的排程同步 Queue 若沒有 consumer，或 consumer 就是目前部署的 Worker，會直接沿用；若已由另一個 Worker 或 HTTP consumer 使用，部署 script 會自動選用 `<Worker 名稱>-sync`，名稱仍被占用時加上流水號。後續更新會沿用已分配的 Queue，原部署的 consumer 保持不變。producer 與 consumer 的名稱會在當次部署的暫存設定一併切換，不會修改 repository 原始設定。
+
+部署 script 會保留既有 VAPID 金鑰，初次部署則自動產生。Cloudflare [每個 Queue 只能綁定一個 consumer Worker](https://developers.cloudflare.com/queues/get-started/#connect-the-consumer-worker-to-your-queue)，因此已有其他 consumer 的 Queue 無法同時提供新 Worker 的背景同步。
 
 GUI 部署使用 Cloudflare Builds 原有的部署 token，不需另建 token 或授予 Access API 權限。
 
