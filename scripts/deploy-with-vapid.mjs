@@ -1,4 +1,4 @@
-import { createECDH } from "node:crypto";
+import { createECDH, randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -20,7 +20,6 @@ const wranglerScript = join(
 );
 
 const deployArguments = process.argv.slice(2);
-const requiredQueueNames = ["taiwan-fin-hub-sync"];
 
 function optionArguments(argumentsToInspect, optionNames) {
   const selected = [];
@@ -221,10 +220,136 @@ export async function ensureQueueExists(
 export async function ensureRequiredQueues(
   contextArguments = queueContextArguments(),
   run = runWrangler,
+  config,
 ) {
-  for (const queueName of requiredQueueNames) {
+  config ??= await readDeploymentConfig(contextArguments);
+  const queueNames = new Set([
+    ...(config.queues?.producers ?? []).map((producer) => producer.queue),
+    ...(config.queues?.consumers ?? []).map((consumer) => consumer.queue),
+  ]);
+  for (const queueName of queueNames) {
+    if (!queueName) continue;
     await ensureQueueExists(queueName, contextArguments, run);
   }
+}
+
+export async function prepareDeploymentQueues(
+  argumentsToDeploy,
+  { run, environment, readConfig = readDeploymentConfig },
+) {
+  const config = await readConfig(argumentsToDeploy);
+  const contextArguments = queueContextArguments(argumentsToDeploy);
+  await ensureRequiredQueues(contextArguments, run, config);
+  const producer = config.queues?.producers?.find(
+    (binding) => binding.binding === "SYNC_QUEUE",
+  );
+  if (
+    !producer?.queue ||
+    !config.queues?.consumers?.some(
+      (consumer) => consumer.queue === producer.queue,
+    )
+  ) {
+    return { argumentsToDeploy, temporaryConfig: null };
+  }
+
+  const workerName = environment.WRANGLER_CI_OVERRIDE_NAME ?? config.name;
+  if (!workerName) throw new Error("Queue setup requires the Worker name.");
+  const inspect = async (queueName) => {
+    const result = await run(
+      ["queues", "consumer", "list", queueName, "--json", ...contextArguments],
+      { captureOutput: true },
+    );
+    if (isMissingQueueResult(result, queueName)) return null;
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `Unable to inspect consumers for Queue '${queueName}'.\n${result.stderr.trim()}`,
+      );
+    }
+    const consumers = JSON.parse(result.stdout);
+    if (!Array.isArray(consumers)) {
+      throw new Error(`Invalid consumer list for Queue '${queueName}'.`);
+    }
+    return consumers;
+  };
+  const belongsToWorker = (consumer) =>
+    consumer.type === "worker" &&
+    [consumer.script, consumer.service, consumer.script_name].includes(
+      workerName,
+    );
+  const occupied = (consumers) =>
+    consumers?.some((consumer) => !belongsToWorker(consumer));
+  const ownQueueName = (suffix = "") =>
+    `${workerName.slice(0, 58 - suffix.length)}-sync${suffix}`;
+
+  let selectedQueue = producer.queue;
+  const configuredConsumers = await inspect(selectedQueue);
+  if (
+    configuredConsumers?.some(belongsToWorker) &&
+    !occupied(configuredConsumers)
+  ) {
+    return { argumentsToDeploy, temporaryConfig: null };
+  }
+  // Keep an earlier fallback even if the originally configured Queue is freed.
+  let candidate = ownQueueName();
+  let candidateConsumers =
+    candidate === selectedQueue
+      ? configuredConsumers
+      : await inspect(candidate);
+  let suffix = 1;
+  while (occupied(candidateConsumers)) {
+    candidate = ownQueueName(`-${++suffix}`);
+    candidateConsumers = await inspect(candidate);
+  }
+  if (
+    candidateConsumers?.some(belongsToWorker) &&
+    !occupied(candidateConsumers)
+  ) {
+    selectedQueue = candidate;
+  } else if (occupied(configuredConsumers)) {
+    selectedQueue = candidate;
+  }
+  if (selectedQueue === producer.queue) {
+    return { argumentsToDeploy, temporaryConfig: null };
+  }
+
+  await ensureQueueExists(selectedQueue, contextArguments, run);
+  const { experimental_readRawConfig } = await import("wrangler");
+  const { rawConfig } = experimental_readRawConfig({
+    config: config.configPath,
+  });
+  const target = config.targetEnvironment
+    ? rawConfig.env[config.targetEnvironment]
+    : rawConfig;
+  target.queues.producers = target.queues.producers.map((binding) =>
+    binding.binding === "SYNC_QUEUE"
+      ? { ...binding, queue: selectedQueue }
+      : binding,
+  );
+  target.queues.consumers = target.queues.consumers.map((consumer) =>
+    consumer.queue === producer.queue
+      ? { ...consumer, queue: selectedQueue }
+      : consumer,
+  );
+  const withoutLongConfig = removeSingleOption(
+    argumentsToDeploy,
+    "--config",
+  ).remaining;
+  const withoutConfig = removeSingleOption(withoutLongConfig, "-c").remaining;
+  // Keeping the file beside the source config preserves relative paths.
+  const temporaryConfig = join(
+    dirname(config.configPath),
+    `.wrangler-queue-${randomUUID()}.json`,
+  );
+  await writeFile(temporaryConfig, `${JSON.stringify(rawConfig)}\n`, {
+    mode: 0o600,
+  });
+  console.log(
+    `[deploy] Using dedicated Queue '${selectedQueue}' for Worker '${workerName}'.`,
+  );
+  return {
+    argumentsToDeploy: [...withoutConfig, "--config", temporaryConfig],
+    temporaryConfig,
+  };
 }
 
 async function existingSecretNames(argumentsToDeploy, run, environment) {
@@ -404,23 +529,10 @@ export async function readDeploymentConfig(argumentsToDeploy) {
   return { ...config, name: valueOf(["--name"]) ?? config.name };
 }
 
-export async function deploy(
-  argumentsToDeploy = deployArguments,
-  {
-    run = runWrangler,
-    environment = process.env,
-    readConfig = readDeploymentConfig,
-    fetchApi,
-    fetchPublic,
-  } = {},
+async function deployPrepared(
+  argumentsToDeploy,
+  { run, environment, readConfig, fetchApi, fetchPublic },
 ) {
-  if (booleanOptionEnabled(argumentsToDeploy, "--dry-run")) {
-    const result = await run(["deploy", ...argumentsToDeploy]);
-    return result.exitCode ?? 1;
-  }
-
-  await ensureRequiredQueues(queueContextArguments(argumentsToDeploy), run);
-
   const { remaining: deployArgumentsWithoutSecretsFile, value: sourceFile } =
     removeSingleOption(argumentsToDeploy, "--secrets-file");
   const effectiveDirectory = deploymentDirectory(argumentsToDeploy);
@@ -514,6 +626,40 @@ export async function deploy(
   } finally {
     if (temporaryDirectory)
       await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+
+export async function deploy(
+  argumentsToDeploy = deployArguments,
+  {
+    run = runWrangler,
+    environment = process.env,
+    readConfig = readDeploymentConfig,
+    fetchApi,
+    fetchPublic,
+  } = {},
+) {
+  if (booleanOptionEnabled(argumentsToDeploy, "--dry-run")) {
+    const result = await run(["deploy", ...argumentsToDeploy]);
+    return result.exitCode ?? 1;
+  }
+  const prepared = await prepareDeploymentQueues(argumentsToDeploy, {
+    run,
+    environment,
+    readConfig,
+  });
+  try {
+    return await deployPrepared(prepared.argumentsToDeploy, {
+      run,
+      environment,
+      readConfig,
+      fetchApi,
+      fetchPublic,
+    });
+  } finally {
+    if (prepared.temporaryConfig) {
+      await rm(prepared.temporaryConfig, { force: true });
+    }
   }
 }
 
