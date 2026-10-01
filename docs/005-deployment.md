@@ -22,15 +22,15 @@ openssl rand -hex 32
 
 ### 2. 執行 Deploy to Cloudflare
 
-帳戶需先啟用 [Zero Trust](https://developers.cloudflare.com/cloudflare-one/setup/)，可選免費方案。點擊 **Deploy to Cloudflare**，授權 Cloudflare 存取 GitHub，填入 `CONFIG_ENCRYPTION_KEY`，保留 `npm run build`／`npm run deploy`。在同一頁開啟 **Protect with Cloudflare Access**，選擇 **All traffic** 與 **Cloudflare account**，確認後點擊 **Deploy**。
+帳戶需先啟用 [Zero Trust](https://developers.cloudflare.com/cloudflare-one/setup/)，可選免費方案。點擊 **Deploy to Cloudflare**，授權 Cloudflare 存取 GitHub，填入 `CONFIG_ENCRYPTION_KEY`，將 **Build command** 設為 `npm run build`、**Deploy command** 設為 `npm run deploy`。在同一頁開啟 **Protect with Cloudflare Access**，選擇 **All traffic** 與 **Cloudflare account**，確認後點擊 **Deploy**。
 
 <img src="../images/deploy-setup.png" alt="Cloudflare 部署頁的 CONFIG_ENCRYPTION_KEY 欄位" width="700">
 
-Cloudflare GUI 會建立登入保護；部署 script 自動取得 Team domain 與 AUD，再部署包含 `TEAM_DOMAIN`、`POLICY_AUD` 的版本。在這兩個值完成前，API 的登入驗證不會成功；請等整個 build 成功後再開始使用。
+Cloudflare 會先建立 Worker，再於背景執行 build。GUI 會建立登入保護；部署 script 自動取得 Team domain 與 AUD，再部署包含 `TEAM_DOMAIN`、`POLICY_AUD` 的版本。在這兩個值完成前，API 的登入驗證不會成功。請以 **Worker → Settings → Builds** 的該次 build 成功為準，完成後重新整理 Worker 頁面，再確認 Domains 狀態並開啟網站。
 
 [Deploy to Cloudflare](https://developers.cloudflare.com/workers/platform/deploy-buttons/) 會從 repository 根目錄的 `.dev.vars.example` 讀取部署時需要填寫的 Secret，並從 `package.json` 取得欄位說明。本專案將正式部署範例與 `apps/worker/.dev.vars.example` 的本機開發設定分開，初始表單只保留加密金鑰；多 Application、Demo、本機開發與 VAPID 參數不需在首次部署填寫。
 
-`.dev.vars.example` 定義 Worker Secret 欄位；Access 的開關、Scope、登入政策及期限需在 Cloudflare GUI 選擇。部署頁的登入期限最多可選 **7 days**，後續可在 Zero Trust [延長登入期限](#延長登入期限)。D1／Queue 的預填名稱已定義於 `wrangler.toml`，Build／Deploy command 則由 `package.json` 的 scripts 自動預填。
+`.dev.vars.example` 定義 Worker Secret 欄位；Access 的開關、Scope、登入政策及期限需在 Cloudflare GUI 選擇。部署頁的登入期限最多可選 **7 days**，後續可在 Zero Trust [延長登入期限](#延長登入期限)。D1／Queue 的預填名稱已定義於 `wrangler.toml`。請確認 **Deploy command** 為 `npm run deploy`；若 GUI 預填 `npx wrangler deploy`，需改為本專案的指令，才能執行完整設定。
 
 `TEAM_DOMAIN` 與 `POLICY_AUD` 可以存入私人 `.dev.vars` 作本機測試，但 `.dev.vars` 不會自動同步到正式 Worker；首次建立 Access Application 時，仍需先取得該帳戶的 Team domain 與新產生的 AUD。
 
@@ -59,6 +59,10 @@ Cloudflare GUI 的 **Deploy command：`npm run deploy`** 會執行 `scripts/depl
 自動化只在 **Workers Builds（`WORKERS_CI=1`）** 執行。本機部署、`--dry-run` 與已知 `DEMO_MODE=true` 的部署會略過 Access 自動化；預覽 build 使用 Cloudflare 預設的 preview command，不會執行 `npm run deploy`。
 
 需要自行維護 Access 驗證值時，可在 **Settings → Builds → Build variables and secrets** 設定 `ACCESS_AUTO_SETUP=false`，再使用下方的手動設定。若舊安裝的 Access Secrets 仍是暫填值，可在相同位置暫時設 `ACCESS_AUTO_SETUP=true` 並重試 build，重新取得正式網址的驗證值；成功後移除此變數。透過 Wrangler `vars` 或 `--secrets-file` 明確提供的手動 Access 驗證值應以手動流程維護。
+
+### 部署成功但缺少 Access 驗證值
+
+檢查 build log 的 **Executing user deploy command**。若為 `npx wrangler deploy`，只會部署 Worker，會跳過本專案的資料庫 migration、VAPID 金鑰與 Access 驗證值設定。前往 **Worker → Settings → Builds**，將 **Deploy command** 改為 `npm run deploy`，再重試 build。首次 Access 自動設定成功時，log 會出現 `[deploy] TEAM_DOMAIN and POLICY_AUD configured automatically.`。
 
 ### 啟用登入保護
 
