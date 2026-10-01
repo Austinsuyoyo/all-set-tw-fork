@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
+import { parseEnv } from "node:util";
+import { prepareAccessSetup } from "./cloudflare-access.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const scriptDirectory = dirname(scriptPath);
@@ -154,8 +156,8 @@ function isMissingWorkerResult(result) {
   );
 }
 
-function queueContextArguments() {
-  return optionArguments(deployArguments, [
+function queueContextArguments(argumentsToDeploy = deployArguments) {
+  return optionArguments(argumentsToDeploy, [
     "--cwd",
     "--config",
     "-c",
@@ -218,14 +220,15 @@ export async function ensureQueueExists(
 
 export async function ensureRequiredQueues(
   contextArguments = queueContextArguments(),
+  run = runWrangler,
 ) {
   for (const queueName of requiredQueueNames) {
-    await ensureQueueExists(queueName, contextArguments);
+    await ensureQueueExists(queueName, contextArguments, run);
   }
 }
 
-async function existingSecretNames() {
-  const contextArguments = optionArguments(deployArguments, [
+async function existingSecretNames(argumentsToDeploy, run) {
+  const contextArguments = optionArguments(argumentsToDeploy, [
     "--cwd",
     "--config",
     "-c",
@@ -234,7 +237,7 @@ async function existingSecretNames() {
     "--env-file",
     "--name",
   ]);
-  const result = await runWrangler(
+  const result = await run(
     ["secret", "list", "--format", "json", ...contextArguments],
     { captureOutput: true },
   );
@@ -265,9 +268,9 @@ async function existingSecretNames() {
   return new Set(secrets.map((secret) => secret?.name).filter(Boolean));
 }
 
-function deploymentDirectory() {
+function deploymentDirectory(argumentsToDeploy) {
   const { value: requestedDirectory } = removeSingleOption(
-    deployArguments,
+    argumentsToDeploy,
     "--cwd",
   );
   return requestedDirectory
@@ -295,25 +298,6 @@ function parseJsonSecrets(content, filePath) {
         `Secret ${key} in ${filePath} must be a string or null value.`,
       );
     }
-  }
-
-  return secrets;
-}
-
-function parseDotenvVapidSecrets(content) {
-  const secrets = {};
-
-  for (const line of content.split(/\r?\n/)) {
-    const match = line.match(
-      /^\s*(?:export\s+)?(VAPID_PUBLIC_KEY|VAPID_PRIVATE_KEY)\s*=\s*(.*)\s*$/,
-    );
-    if (!match) continue;
-
-    const value = match[2].trim();
-    const quotedValue = value.match(/^(['"])(.*?)\1(?:\s*#.*)?$/);
-    secrets[match[1]] = quotedValue
-      ? quotedValue[2]
-      : value.replace(/\s*#.*$/, "").trim();
   }
 
   return secrets;
@@ -388,32 +372,60 @@ async function readSuppliedSecretsFile(sourceFile, effectiveDirectory) {
   const sourcePath = resolve(effectiveDirectory, sourceFile);
   const content = await readFile(sourcePath, "utf8");
   const parsedJson = parseJsonSecrets(content, sourceFile);
-  const secrets = parsedJson ?? parseDotenvVapidSecrets(content);
+  const secrets = parsedJson ?? parseEnv(content);
 
   return {
     content,
     parsedJson,
+    values: secrets,
     vapidKeys: providedVapidKeys(secrets, sourceFile),
   };
 }
 
-async function deploy() {
-  if (booleanOptionEnabled(deployArguments, "--dry-run")) {
-    const result = await runWrangler(["deploy", ...deployArguments]);
-    if (result.exitCode !== 0) process.exitCode = result.exitCode ?? 1;
-    return;
+export async function readDeploymentConfig(argumentsToDeploy) {
+  const { unstable_readConfig } = await import("wrangler");
+  const effectiveDirectory = deploymentDirectory(argumentsToDeploy);
+  const valueOf = (names) => {
+    const selected = optionArguments(argumentsToDeploy, names);
+    const last = selected.at(-1);
+    return last?.includes("=") ? last.slice(last.indexOf("=") + 1) : last;
+  };
+  const configFile = valueOf(["--config", "-c"]) ?? "wrangler.toml";
+  const config = unstable_readConfig(
+    {
+      config: resolve(effectiveDirectory, configFile),
+      env: valueOf(["--env", "-e"]),
+    },
+    { hideWarnings: true },
+  );
+  return { ...config, name: valueOf(["--name"]) ?? config.name };
+}
+
+export async function deploy(
+  argumentsToDeploy = deployArguments,
+  {
+    run = runWrangler,
+    environment = process.env,
+    readConfig = readDeploymentConfig,
+    fetchApi,
+    fetchPublic,
+  } = {},
+) {
+  if (booleanOptionEnabled(argumentsToDeploy, "--dry-run")) {
+    const result = await run(["deploy", ...argumentsToDeploy]);
+    return result.exitCode ?? 1;
   }
 
-  await ensureRequiredQueues();
+  await ensureRequiredQueues(queueContextArguments(argumentsToDeploy), run);
 
   const { remaining: deployArgumentsWithoutSecretsFile, value: sourceFile } =
-    removeSingleOption(deployArguments, "--secrets-file");
-  const effectiveDirectory = deploymentDirectory();
+    removeSingleOption(argumentsToDeploy, "--secrets-file");
+  const effectiveDirectory = deploymentDirectory(argumentsToDeploy);
   const suppliedSecrets = await readSuppliedSecretsFile(
     sourceFile,
     effectiveDirectory,
   );
-  const secrets = await existingSecretNames();
+  const secrets = await existingSecretNames(argumentsToDeploy, run);
   const hasPublicKey = secrets?.has("VAPID_PUBLIC_KEY") ?? false;
   const hasPrivateKey = secrets?.has("VAPID_PRIVATE_KEY") ?? false;
   const needsInitialKeys =
@@ -425,39 +437,84 @@ async function deploy() {
     );
   }
 
-  if (!needsInitialKeys) {
-    const result = await runWrangler(["deploy", ...deployArguments]);
-    if (result.exitCode !== 0) process.exitCode = result.exitCode ?? 1;
-    return;
+  let accessSetup = null;
+  if (
+    environment.WORKERS_CI === "1" &&
+    environment.ACCESS_AUTO_SETUP !== "false"
+  ) {
+    accessSetup = await prepareAccessSetup({
+      environment,
+      config: await readConfig(argumentsToDeploy),
+      existingSecrets: secrets,
+      suppliedSecrets: suppliedSecrets?.values,
+      fetchApi,
+      fetchPublic,
+    });
   }
 
-  const temporaryDirectory = await mkdtemp(
-    join(tmpdir(), "taiwan-fin-hub-vapid-"),
-  );
+  const temporaryDirectory =
+    needsInitialKeys || accessSetup
+      ? await mkdtemp(join(tmpdir(), "taiwan-fin-hub-deploy-"))
+      : null;
 
   try {
-    const { secretsFile, generated } = await createInitialSecretsFile(
-      temporaryDirectory,
-      suppliedSecrets,
-    );
-    console.log(
-      generated
-        ? "[deploy] No VAPID key pair found; generating one for this Worker."
-        : "[deploy] Using the VAPID key pair from the supplied secrets file.",
-    );
+    let argumentsForUpload = argumentsToDeploy;
+    if (needsInitialKeys) {
+      const { secretsFile, generated } = await createInitialSecretsFile(
+        temporaryDirectory,
+        suppliedSecrets,
+      );
+      console.log(
+        generated
+          ? "[deploy] No VAPID key pair found; generating one for this Worker."
+          : "[deploy] Using the VAPID key pair from the supplied secrets file.",
+      );
+      argumentsForUpload = [
+        ...deployArgumentsWithoutSecretsFile,
+        "--secrets-file",
+        secretsFile,
+      ];
+    }
 
-    const result = await runWrangler([
-      "deploy",
-      ...deployArgumentsWithoutSecretsFile,
-      "--secrets-file",
-      secretsFile,
-    ]);
-    if (result.exitCode !== 0) process.exitCode = result.exitCode ?? 1;
+    const result = await run(["deploy", ...argumentsForUpload]);
+    if (result.exitCode !== 0) return result.exitCode ?? 1;
+
+    if (accessSetup) {
+      const accessSecrets = await accessSetup.complete();
+      const secretsFile = join(temporaryDirectory, "access-secrets.json");
+      await writeFile(secretsFile, `${JSON.stringify(accessSecrets)}\n`, {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      // Upload a deployed version with the derived values. Wrangler preserves
+      // secrets not included here, including CONFIG_ENCRYPTION_KEY and VAPID.
+      const configured = await run([
+        "deploy",
+        ...deployArgumentsWithoutSecretsFile,
+        "--secrets-file",
+        secretsFile,
+      ]);
+      if (configured.exitCode !== 0) {
+        throw new Error(
+          "Worker Access is configured, but deploying its verification secrets failed. Retry the Cloudflare GUI deployment to finish setup.",
+        );
+      }
+      console.log(
+        "[deploy] TEAM_DOMAIN and POLICY_AUD configured automatically.",
+      );
+    }
+    return 0;
   } finally {
-    await rm(temporaryDirectory, { recursive: true, force: true });
+    if (temporaryDirectory)
+      await rm(temporaryDirectory, { recursive: true, force: true });
   }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === scriptPath) {
-  await deploy();
+  try {
+    process.exitCode = await deploy();
+  } catch (error) {
+    console.error(`[deploy] ${error.message}`);
+    process.exitCode = 1;
+  }
 }
