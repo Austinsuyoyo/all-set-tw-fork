@@ -227,16 +227,19 @@ export async function ensureRequiredQueues(
   }
 }
 
-async function existingSecretNames(argumentsToDeploy, run) {
+async function existingSecretNames(argumentsToDeploy, run, environment) {
+  const guiWorkerName = environment.WRANGLER_CI_OVERRIDE_NAME;
+  // secret list does not apply the Builds name override. With --name, --env
+  // would append a suffix to the GUI's already complete Worker name.
   const contextArguments = optionArguments(argumentsToDeploy, [
     "--cwd",
     "--config",
     "-c",
-    "--env",
-    "-e",
+    ...(guiWorkerName ? [] : ["--env", "-e"]),
     "--env-file",
-    "--name",
+    ...(guiWorkerName ? [] : ["--name"]),
   ]);
+  if (guiWorkerName) contextArguments.push("--name", guiWorkerName);
   const result = await run(
     ["secret", "list", "--format", "json", ...contextArguments],
     { captureOutput: true },
@@ -425,7 +428,11 @@ export async function deploy(
     sourceFile,
     effectiveDirectory,
   );
-  const secrets = await existingSecretNames(argumentsToDeploy, run);
+  const secrets = await existingSecretNames(
+    argumentsToDeploy,
+    run,
+    environment,
+  );
   const hasPublicKey = secrets?.has("VAPID_PUBLIC_KEY") ?? false;
   const hasPrivateKey = secrets?.has("VAPID_PRIVATE_KEY") ?? false;
   const needsInitialKeys =
