@@ -75,15 +75,15 @@ openssl rand -hex 32
 
 <img src="images/deploy-setup.png" alt="Cloudflare 部署頁的 CONFIG_ENCRYPTION_KEY 欄位" width="700">
 
-保留資源名稱及 **Build command：`npm run build`／Deploy command：`npm run deploy`**。在同一頁開啟 **Protect with Cloudflare Access**，設定：
+將 **Build command** 設為 `npm run build`、**Deploy command** 設為 `npm run deploy`，資源名稱可保留預填值。在同一頁開啟 **Protect with Cloudflare Access**，設定：
 
 - **Scope：All traffic**，保護正式與預覽部署
 - **Authentication policy：Cloudflare account**，限定你的 Cloudflare 帳戶成員登入
-- **Session duration：**可保留預設 **24 hours**；想延長可選 **7 days**
+- **Session duration**：可保留預設 **24 hours**；想延長可選 **7 days**
 
 <img src="images/deploy-access-on-create.png" alt="部署頁開啟 Cloudflare Access，選擇 All traffic 與 Cloudflare account" width="700">
 
-確認後點擊 **Deploy**。部署流程會自動取得登入驗證設定，後續更新也會沿用；等整個 build 成功後即可登入使用。
+確認後點擊 **Deploy**。前往 **Worker → Settings → Builds**，等該次 build 顯示成功後重新整理 Worker 頁面，再開啟網站。登入驗證設定會自動取得，後續更新也會沿用。
 
 ### 步驟二：確認部署
 
