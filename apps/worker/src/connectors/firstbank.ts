@@ -1229,10 +1229,6 @@ async function collectFirstbankPayloads(
     collectingCards = true;
     await collectCardPayloads(page, cardFrame, captured);
     await Promise.allSettled(responseTasks);
-    // The card member logout also invalidates the NetBank session, but the
-    // bank keeps its single-login lock for about ten minutes. Release it with
-    // the frameset's own logout() so the next sync is not MULTI_SESSION_LOGIN.
-    if (captured.cardMemberLoggedOut) await logoutNetbank(page);
 
     return {
       depositOverviewHtml,
@@ -1245,6 +1241,13 @@ async function collectFirstbankPayloads(
         : captured.recentPayments,
     } as unknown as FirstbankPayloads;
   } finally {
+    // The card member logout also invalidates the NetBank session, but the
+    // bank keeps its single-login lock for about ten minutes. Release it with
+    // the frameset's own logout() even when collection fails afterwards, so
+    // the next sync is not MULTI_SESSION_LOGIN.
+    if (captured.cardMemberLoggedOut) {
+      await logoutNetbank(page).catch(() => undefined);
+    }
     if (transactionResponse.pending.size > 0) {
       await withActionTimeout(
         Promise.allSettled(Array.from(transactionResponse.pending)),
