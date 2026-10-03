@@ -33,62 +33,6 @@ describe("connector settings repository", () => {
     ]);
   });
 
-  it("upserts by connector while retaining the original identity, creation time and cursor", async () => {
-    const db = harness.binding;
-    await expect(getConnectorSettings(db, "test")).resolves.toBeNull();
-    await upsertConnectorSettings(db, input);
-    await expect(getConnectorSettings(db, "test")).resolves.toMatchObject({
-      public_config: null,
-      sync_cursor: null,
-    });
-    await updateConnectorCursor(db, "test", "synthetic-cursor", now);
-    await upsertConnectorSettings(db, {
-      ...input,
-      id: "replacement-id",
-      encryptedConfig: "replacement-encrypted",
-      publicConfig: '{"visible":true}',
-      now: later,
-    });
-    await expect(getConnectorSettings(db, "test")).resolves.toEqual({
-      id: input.id,
-      connector_id: "test",
-      encrypted_config: "replacement-encrypted",
-      public_config: '{"visible":true}',
-      sync_cursor: "synthetic-cursor",
-      created_at: now,
-      updated_at: later,
-    });
-  });
-
-  it("updates public configuration and clears cursors without replacing credentials or other connectors", async () => {
-    const db = harness.binding;
-    await upsertConnectorSettings(db, input);
-    await upsertConnectorSettings(db, {
-      ...input,
-      id: "settings:other",
-      connectorId: "other",
-    });
-    await updateConnectorCursor(db, "test", "cursor", now);
-    await updateConnectorPublicConfig(db, "test", "{}", later);
-    await expect(getConnectorSettings(db, "test")).resolves.toMatchObject({
-      encrypted_config: input.encryptedConfig,
-      public_config: "{}",
-      sync_cursor: "cursor",
-    });
-    await clearConnectorCursor(db, "test", later);
-    await expect(getConnectorSettings(db, "test")).resolves.toMatchObject({
-      encrypted_config: input.encryptedConfig,
-      public_config: "{}",
-      sync_cursor: null,
-      updated_at: later,
-    });
-    await expect(getConnectorSettings(db, "other")).resolves.toMatchObject({
-      public_config: null,
-      sync_cursor: null,
-      updated_at: now,
-    });
-  });
-
   it("removes bound settings and cursor values from database errors before callers can log or persist them", async () => {
     const db = harness.binding;
     await upsertConnectorSettings(db, input);

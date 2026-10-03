@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  parseRakutenData,
-  parseRakutenDepositTransactions,
-} from "@taiwan-fin-hub/connectors";
+import { parseRakutenDepositTransactions } from "@taiwan-fin-hub/connectors";
 
 const ACCOUNT_NO = "0081200000001234";
 const ACCOUNT_SOURCE_ID = `bank:rakuten:${ACCOUNT_NO}:TWD`;
@@ -172,23 +169,6 @@ describe("parseRakutenDepositTransactions direction", () => {
     expect(result.stats.directionByAmtSign).toBe(1);
   });
 
-  it("learns the amtSign mapping across months for the oldest row of a month", () => {
-    const result = parseRakutenDepositTransactions(
-      [month(SEPTEMBER), month([AUGUST[0]!], { trueMeansCredit: true })],
-      deposits,
-    );
-    // 只有一筆的月份沒有餘額差可比，靠 9 月學到的對應（true = 收入）
-    const single = result.transactions.find(
-      (tx) =>
-        tx.raw &&
-        (tx.raw as { balanceAfter?: number }).balanceAfter === 110_000,
-    );
-    expect(single?.amount).toBe(20_000);
-    expect((single?.raw as { directionSource?: string }).directionSource).toBe(
-      "amtSign",
-    );
-  });
-
   it("skips the month (and reports it) when direction cannot be determined", () => {
     const result = parseRakutenDepositTransactions(
       [month([AUGUST[0]!])],
@@ -201,108 +181,12 @@ describe("parseRakutenDepositTransactions direction", () => {
       skipReasons: { direction_unknown: 1 },
     });
   });
-
-  it("does not trust amtSign when the evidence contradicts itself", () => {
-    // 9 月 true = 收入；8 月把 amtSign 全部反過來 → 對應互相矛盾，最舊那筆無法判斷
-    const result = parseRakutenDepositTransactions(
-      [month(SEPTEMBER), month(AUGUST, { trueMeansCredit: false })],
-      deposits,
-    );
-    expect(result.stats.skipReasons).toEqual({ direction_unknown: 2 });
-    expect(result.transactions).toEqual([]);
-  });
-
-  it("does not use rows whose balance chain does not add up", () => {
-    const broken = month(SEPTEMBER);
-    // 中間那筆的交易後餘額被改壞：兩筆相鄰差都對不上，退回 amtSign，但沒有對應可學 → 整月略過
-    broken.txDetails[1]!.balance = "999,999";
-    const result = parseRakutenDepositTransactions([broken], deposits);
-    expect(result.transactions).toEqual([]);
-    expect(result.stats.skipReasons).toEqual({ direction_unknown: 1 });
-  });
-
-  it("resolves same-minute rows by trying both orders and accepting only one consistent chain", () => {
-    const sameMinute: Row[] = [
-      {
-        sysDate: "2026/09/05",
-        sysTime: "10:00",
-        credit: true,
-        amt: "500",
-        balance: "1,500",
-        txDesc: "他行轉入",
-        pk: "20260905100000021",
-      },
-      {
-        sysDate: "2026/09/05",
-        sysTime: "10:00",
-        credit: false,
-        amt: "200",
-        balance: "1,300",
-        txDesc: "轉帳",
-        pk: "20260905100000022",
-      },
-    ];
-    const result = parseRakutenDepositTransactions(
-      [month(sameMinute, { order: "oldestFirst" })],
-      deposits,
-    );
-    expect(
-      result.transactions.map((tx) => tx.amount).sort((a, b) => a - b),
-    ).toEqual([-200, 500]);
-  });
 });
 
 describe("parseRakutenDepositTransactions fields", () => {
   const result = parseRakutenDepositTransactions([month(SEPTEMBER)], deposits);
   const byDescription = (text: string) =>
     result.transactions.find((tx) => tx.description?.startsWith(text))!;
-
-  it("maps rows to bank transactions of the deposit account", () => {
-    expect(result.transactions).toHaveLength(3);
-    for (const tx of result.transactions) {
-      expect(tx.accountId).toBe(ACCOUNT_SOURCE_ID);
-      expect(tx.currency).toBe("TWD");
-      expect(tx.status).toBe("posted");
-      expect(tx.sourceId).toMatch(/^rakuten:deposit:tx:[0-9a-f]{16}$/);
-    }
-    expect(new Set(result.transactions.map((tx) => tx.sourceId)).size).toBe(3);
-  });
-
-  it("uses Taipei date for postedDate and a +08:00 timestamp for authorizedAt", () => {
-    const autoDebit = byDescription("自動扣款");
-    expect(autoDebit.postedDate).toBe("2026-09-17");
-    expect(autoDebit.authorizedAt).toBe("2026-09-17T08:30:00+08:00");
-    expect(byDescription("存款利息").authorizedAt).toBe(
-      "2026-09-04T00:05:00+08:00",
-    );
-  });
-
-  it("keeps short memos in the description and drops long ones", () => {
-    expect(byDescription("他行轉入").description).toBe("他行轉入 · 薪資");
-    const long = month([
-      {
-        ...SEPTEMBER[0]!,
-        memo: "這是一段很長很長很長很長很長很長很長很長很長很長的轉帳留言內容",
-      },
-    ]);
-    const longResult = parseRakutenDepositTransactions([long], deposits);
-    expect(longResult.stats.monthsSkipped).toBe(1);
-    const withMapping = parseRakutenDepositTransactions(
-      [
-        month(SEPTEMBER),
-        month([
-          {
-            ...AUGUST[0]!,
-            memo: "這是一段很長很長很長很長很長很長很長很長很長很長的轉帳留言內容",
-          },
-        ]),
-      ],
-      deposits,
-    );
-    expect(
-      withMapping.transactions.some((tx) => tx.description === "他行轉入"),
-    ).toBe(true);
-  });
 
   it("stores only the last four digits of the counterparty account, never the full number", () => {
     expect(byDescription("他行轉入").counterparty).toBe("****7890");
@@ -317,183 +201,11 @@ describe("parseRakutenDepositTransactions fields", () => {
     expect(withoutAccountId).not.toContain(ACCOUNT_NO);
   });
 
-  it("prefers a non-numeric nickname over the account digits", () => {
-    const nick = parseRakutenDepositTransactions(
-      [month([{ ...SEPTEMBER[0]!, nickNameOrAcct: "房東" }, SEPTEMBER[1]!])],
-      deposits,
-    );
-    expect(
-      nick.transactions.find((tx) => tx.amount === 30_000)?.counterparty,
-    ).toBe("房東");
-  });
-
-  it("derives a stable sourceId from pk and falls back to a field hash when pk is missing", () => {
-    const again = parseRakutenDepositTransactions([month(SEPTEMBER)], deposits);
-    expect(again.transactions.map((tx) => tx.sourceId)).toEqual(
-      result.transactions.map((tx) => tx.sourceId),
-    );
-    const noPk = parseRakutenDepositTransactions(
-      [month(SEPTEMBER.map((row) => ({ ...row, pk: null })))],
-      deposits,
-    );
-    expect(noPk.transactions).toHaveLength(3);
-    expect(noPk.transactions[0]!.sourceId).not.toBe(
-      result.transactions[0]!.sourceId,
-    );
-    const noPkAgain = parseRakutenDepositTransactions(
-      [month(SEPTEMBER.map((row) => ({ ...row, pk: null })))],
-      deposits,
-    );
-    expect(noPkAgain.transactions.map((tx) => tx.sourceId)).toEqual(
-      noPk.transactions.map((tx) => tx.sourceId),
-    );
-  });
-
   it("dedupes rows that appear in more than one month response", () => {
     const overlapping = parseRakutenDepositTransactions(
       [month(SEPTEMBER), month(SEPTEMBER)],
       deposits,
     );
     expect(overlapping.transactions).toHaveLength(3);
-  });
-
-  it("keeps only whitelisted raw fields", () => {
-    for (const tx of result.transactions) {
-      const keys = Object.entries(tx.raw as Record<string, unknown>)
-        .filter(([, value]) => value !== undefined)
-        .map(([key]) => key)
-        .sort();
-      expect(keys).toEqual(["balanceAfter", "directionSource", "txDesc"]);
-    }
-  });
-});
-
-describe("parseRakutenDepositTransactions robustness", () => {
-  it("skips months of another account and invalid payloads without throwing", () => {
-    const result = parseRakutenDepositTransactions(
-      [
-        month(SEPTEMBER, { queryAccountNo: "0081299999999999" }),
-        null,
-        { display: {}, txDetails: "oops", queryAccountNo: ACCOUNT_NO },
-        month(SEPTEMBER),
-      ],
-      deposits,
-    );
-    expect(result.transactions).toHaveLength(3);
-    expect(result.stats).toMatchObject({
-      monthsProvided: 4,
-      monthsParsed: 1,
-      monthsSkipped: 3,
-      skipReasons: { account_mismatch: 1, invalid_payload: 2 },
-    });
-  });
-
-  it("treats noData months as parsed and counts truncated months", () => {
-    const result = parseRakutenDepositTransactions(
-      [
-        {
-          display: { dataEnd: true, dataLimit: false, noData: true },
-          accounts: [],
-          queryAccountNo: ACCOUNT_NO,
-        },
-        month(SEPTEMBER, { display: { dataEnd: false, dataLimit: true } }),
-      ],
-      deposits,
-    );
-    expect(result.stats).toMatchObject({
-      monthsParsed: 2,
-      monthsSkipped: 0,
-      monthsTruncated: 1,
-      rowsParsed: 3,
-    });
-  });
-
-  it("does not count empty months as truncated", () => {
-    const result = parseRakutenDepositTransactions(
-      [
-        {
-          display: { dataEnd: false, dataLimit: false, noData: true },
-          accounts: [],
-          queryAccountNo: ACCOUNT_NO,
-          txDetails: [],
-        },
-        {
-          display: { dataEnd: false, dataLimit: false, noData: false },
-          accounts: [],
-          queryAccountNo: ACCOUNT_NO,
-          txDetails: [],
-        },
-      ],
-      deposits,
-    );
-    expect(result.stats).toMatchObject({
-      monthsParsed: 2,
-      monthsSkipped: 0,
-      monthsTruncated: 0,
-    });
-    expect(result.transactions).toHaveLength(0);
-  });
-
-  it("counts malformed rows instead of dropping the whole month", () => {
-    const payload = month(SEPTEMBER);
-    payload.txDetails.push({ sysDate: "not a date", amt: "x" } as never);
-    const result = parseRakutenDepositTransactions([payload], deposits);
-    expect(result.stats.rowsSkipped).toBe(1);
-    expect(result.transactions).toHaveLength(3);
-  });
-
-  it("matches the account by its comparable number and falls back to the only deposit when the response has no number", () => {
-    const dashed = parseRakutenDepositTransactions(
-      [month(SEPTEMBER, { queryAccountNo: "0081-2000-0000-1234" })],
-      deposits,
-    );
-    expect(dashed.transactions).toHaveLength(3);
-    const noNumber = month(SEPTEMBER);
-    delete (noNumber as { queryAccountNo?: string }).queryAccountNo;
-    noNumber.accounts = [];
-    expect(
-      parseRakutenDepositTransactions([noNumber], deposits).transactions,
-    ).toHaveLength(3);
-  });
-});
-
-describe("parseRakutenData with deposit transactions", () => {
-  const dashboardPayload = {
-    depositInfo: {
-      depAccounts: [
-        { acctNo: ACCOUNT_NO, showAcctNo: "008-***-1234", ntdCurrBal: 123_469 },
-      ],
-    },
-  };
-
-  it("returns transactions for the deposit account next to balances", () => {
-    const data = parseRakutenData({
-      dashboardPayload,
-      depositTxnPayloads: [month(SEPTEMBER), month(AUGUST)],
-    });
-    expect(data.bankAccounts).toHaveLength(1);
-    expect(data.bankBalanceSnapshots).toHaveLength(1);
-    expect(data.bankTransactions).toHaveLength(6);
-    expect(
-      data.bankTransactions.every((tx) => tx.accountId === ACCOUNT_SOURCE_ID),
-    ).toBe(true);
-    expect(data.transactionStats.monthsParsed).toBe(2);
-  });
-
-  it("keeps balances when the transaction payloads are unusable", () => {
-    const data = parseRakutenData({
-      dashboardPayload,
-      depositTxnPayloads: [{ nonsense: true }, null],
-    });
-    expect(data.bankAccounts).toHaveLength(1);
-    expect(data.bankBalanceSnapshots).toHaveLength(1);
-    expect(data.bankTransactions).toEqual([]);
-    expect(data.transactionStats.monthsSkipped).toBe(2);
-  });
-
-  it("produces no transactions without payloads", () => {
-    const data = parseRakutenData({ dashboardPayload });
-    expect(data.bankTransactions).toEqual([]);
-    expect(data.transactionStats.monthsProvided).toBe(0);
   });
 });

@@ -421,7 +421,7 @@ export const connectorCatalog = {
   sinopac: {
     id: "sinopac",
     title: "永豐行動銀行",
-    description: "信用卡帳務、近期帳單與消費",
+    description: "臺外幣活存帳戶、餘額與交易；信用卡帳務、帳單與消費",
     connectionMode: "browser_captcha_session",
     scopes: ["all"],
     capabilities: [
