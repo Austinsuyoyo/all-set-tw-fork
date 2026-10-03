@@ -61,6 +61,13 @@ const FRAME_PROBE_TIMEOUT_MS = 1_000;
 // local recorder, so keep enough headroom and fail closed if a dispatched card
 // query never produces its expected response.
 const CARD_RESPONSE_TIMEOUT_MS = 30_000;
+// Live no-card account: the card bridge goes netbanktrust -> BillingQuery ->
+// Home/Logout ("您已登出信用卡會員服務系統") without any card API or no-card text.
+const CARD_MEMBER_LOGOUT_PATH = "/cmsweb/Home/Logout";
+// The query page lists one account per option and returns one account per
+// search; cap the loop so an unexpected option list cannot run unbounded.
+const MAX_TRANSACTION_QUERY_ACCOUNTS = 10;
+const NETBANK_LOGOUT_SETTLE_MS = 2_000;
 const SESSION_RELEASE_TIMEOUT_MS = 2_000;
 const SESSION_RELEASE_POLL_MS = 100;
 const MAX_SERIALIZED_TABLE_BYTES = 512 * 1024;
@@ -87,6 +94,7 @@ type CardPayloadKey = "cardBill" | "recentPayments" | "cardUnbilled";
 
 type CapturedCardResponses = Partial<Record<CardPayloadKey, unknown>> & {
   noCreditCard?: boolean;
+  cardMemberLoggedOut?: boolean;
 };
 
 type DepositResponseCapture = {
@@ -927,7 +935,7 @@ async function collectFirstbankPayloads(
   const captured: CapturedCardResponses = {};
   const responseTasks: Promise<void>[] = [];
   const depositResponse = createDepositResponseCapture();
-  const transactionResponse = createTransactionResponseCapture();
+  let transactionResponse = createTransactionResponseCapture();
   const cdp = await page.createCDPSession();
   try {
     await cdp.send("Network.enable", {
@@ -1101,6 +1109,22 @@ async function collectFirstbankPayloads(
       void task.catch(() => undefined);
       return;
     }
+    // Only before any card payload arrives: a logout after a captured payload
+    // must not discard that data as a no-card result.
+    if (
+      collectingCards &&
+      urlPathname(response.url()) === CARD_MEMBER_LOGOUT_PATH &&
+      !CARD_QUERIES.some(({ key }) =>
+        Object.prototype.hasOwnProperty.call(captured, key),
+      )
+    ) {
+      captured.noCreditCard = true;
+      captured.cardMemberLoggedOut = true;
+      logFirstbankStage("card-member-logout", {
+        path: CARD_MEMBER_LOGOUT_PATH,
+        status: httpStatus(response),
+      });
+    }
     const key = cardResponseKey(response.url());
     if (!key) return;
     logFirstbankStage("card-http-response", {
@@ -1170,20 +1194,44 @@ async function collectFirstbankPayloads(
       overviewFrame,
     );
 
-    await navigateFrame(depositFrame, TRANSACTION_URL);
-    const queryFrame = await waitForLiveTransactionQueryFrame(
-      page,
-      depositFrame,
-    );
-    const transactionHistoryHtml = await submitTransactionQuery(
-      page,
-      queryFrame,
-      transactionResponse,
-    );
+    const transactionHistoryHtml: string[] = [];
+    let queryFrame = depositFrame;
+    let accountCount = 1;
+    for (let accountIndex = 0; accountIndex < accountCount; accountIndex += 1) {
+      if (accountIndex > 0) {
+        // Listeners read transactionResponse when an event arrives, so a
+        // late body from the previous account settles the old capture only.
+        await withActionTimeout(
+          Promise.allSettled(Array.from(transactionResponse.pending)),
+          RESULT_CAPTURE_WAIT_MS,
+        ).catch(() => undefined);
+        transactionResponse = createTransactionResponseCapture();
+      }
+      await navigateFrame(depositFrame, TRANSACTION_URL);
+      queryFrame = await waitForLiveTransactionQueryFrame(page, depositFrame);
+      const query = await submitTransactionQuery(
+        page,
+        queryFrame,
+        transactionResponse,
+        accountIndex,
+      );
+      transactionHistoryHtml.push(query.html);
+      accountCount = Math.min(
+        query.accountCount,
+        MAX_TRANSACTION_QUERY_ACCOUNTS,
+      );
+      logFirstbankStage("0101-account-complete", {
+        detail: `${accountIndex + 1}/${accountCount}`,
+      });
+    }
     const cardFrame = pickCardNavigationFrame(page, depositFrame) ?? queryFrame;
     collectingCards = true;
     await collectCardPayloads(page, cardFrame, captured);
     await Promise.allSettled(responseTasks);
+    // The card member logout also invalidates the NetBank session, but the
+    // bank keeps its single-login lock for about ten minutes. Release it with
+    // the frameset's own logout() so the next sync is not MULTI_SESSION_LOGIN.
+    if (captured.cardMemberLoggedOut) await logoutNetbank(page);
 
     return {
       depositOverviewHtml,
@@ -1215,6 +1263,27 @@ async function collectFirstbankPayloads(
     }
     await cdp.detach().catch(() => undefined);
   }
+}
+
+async function logoutNetbank(page: Page) {
+  const framePath = urlPathname(FRAME_URL);
+  const frameset = liveFrames(page).find(
+    (candidate) => framePathname(candidate) === framePath,
+  );
+  const invoked = frameset
+    ? await withActionTimeout(
+        frameset.evaluate(() => {
+          const logout = (window as Window & { logout?: () => void }).logout;
+          if (typeof logout !== "function") return false;
+          logout();
+          return true;
+        }),
+      ).catch(() => false)
+    : false;
+  logFirstbankStage(invoked ? "netbank-logout" : "netbank-logout-unavailable", {
+    path: frameset ? framePathname(frameset) : undefined,
+  });
+  if (invoked) await delay(NETBANK_LOGOUT_SETTLE_MS);
 }
 
 const CARD_QUERIES = [
@@ -1779,9 +1848,11 @@ async function submitTransactionQuery(
   page: Page,
   frame: Frame,
   transactionResponse: TransactionResponseCapture,
+  accountIndex: number,
 ) {
   const deadline = Date.now() + ACTION_TIMEOUT_MS;
   let queryFrame = frame;
+  let accountCount = 0;
   for (;;) {
     queryFrame = await waitForLiveTransactionQueryFrame(
       page,
@@ -1799,7 +1870,8 @@ async function submitTransactionQuery(
       queryFrame = accountFrame;
       continue;
     }
-    if (!(await selectQueryAccount(queryFrame))) {
+    accountCount = await selectQueryAccount(queryFrame, false, accountIndex);
+    if (!accountCount) {
       const replacement = await findLiveTransactionQueryFrame(page, queryFrame);
       if (replacement && replacement !== queryFrame) {
         queryFrame = replacement;
@@ -1827,7 +1899,10 @@ async function submitTransactionQuery(
     path: urlPathname(TRANSACTION_URL),
   });
   await clickTransactionSearch(queryFrame);
-  return waitForTransactionHistory(page, transactionResponse);
+  return {
+    html: await waitForTransactionHistory(page, transactionResponse),
+    accountCount,
+  };
 }
 
 async function waitForTransactionHistory(
@@ -2079,11 +2154,18 @@ async function waitForQueryAccountOptions(
   throw new FirstbankConnectionError("第一銀行交易明細查詢帳號無法選取。");
 }
 
-async function selectQueryAccount(frame: Frame, dryRun = false) {
+// Returns how many accounts the query page offers; 0 means no account could be
+// read or selected.
+async function selectQueryAccount(
+  frame: Frame,
+  dryRun = false,
+  accountIndex = 0,
+) {
+  const selection = [!dryRun, accountIndex] as const;
   try {
-    return Boolean(
+    return Number(
       await withActionTimeout(
-        frame.evaluate((shouldSelect) => {
+        frame.evaluate(([shouldSelect, index]) => {
           type QueryAccountSelect = {
             options: ArrayLike<{
               selected: boolean;
@@ -2107,27 +2189,28 @@ async function selectQueryAccount(frame: Frame, dryRun = false) {
           const select = document.querySelector(
             'select[name="acnt"]',
           ) as QueryAccountSelect | null;
-          if (!select) return false;
-          const option = Array.from(select.options).find(
+          if (!select) return 0;
+          const accounts = Array.from(select.options).filter(
             (candidate) => !isPlaceholder(candidate.text, candidate.value),
           );
-          if (!option) return false;
-          if (!shouldSelect) return true;
+          const option = accounts[index];
+          if (!option) return 0;
+          if (!shouldSelect) return accounts.length;
           select.value = option.value;
           option.selected = true;
           select.dispatchEvent(new Event("input", { bubbles: true }));
           select.dispatchEvent(new Event("change", { bubbles: true }));
           const selected = select.options[select.selectedIndex];
-          return (
-            select.value === option.value &&
+          return select.value === option.value &&
             selected !== undefined &&
             !isPlaceholder(selected.text, selected.value)
-          );
-        }, !dryRun),
+            ? accounts.length
+            : 0;
+        }, selection),
       ),
     );
   } catch {
-    return false;
+    return 0;
   }
 }
 
