@@ -1,4 +1,4 @@
-import type { parseNextbankDeposits } from "@taiwan-fin-hub/connectors";
+import type { parseNextbankDeposits } from "../../connectors/protocols/nextbank";
 import { bankBalanceSnapshotRecord } from "./record-mapper";
 
 /** Call only after the complete main/pocket response passed normalization and

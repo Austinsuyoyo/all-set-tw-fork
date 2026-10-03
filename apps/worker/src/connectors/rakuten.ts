@@ -1,3 +1,4 @@
+import type { SyncResult } from "./types";
 /**
  * 樂天國際銀行 connector（Cloudflare Browser Rendering）。
  *
@@ -15,12 +16,8 @@ import puppeteer, {
   type HTTPResponse,
   type Page,
 } from "@cloudflare/puppeteer";
-import {
-  BANK_SYNC_MONTHS,
-  parseRakutenData,
-  type RakutenConfig,
-} from "@taiwan-fin-hub/connectors";
-import type { SyncResult } from "@taiwan-fin-hub/core";
+import { BANK_SYNC_MONTHS } from "./protocols/sync-window";
+import { parseRakutenData, type RakutenConfig } from "./protocols/rakuten";
 
 // 網址與 API 端點定義
 const LOGIN_URL = "https://www.rakuten-bank.com.tw/ebank/cgn/cgnot0001/010";

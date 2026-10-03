@@ -16,11 +16,16 @@ apps/web/src/
 
 ## 相依方向
 
+`apps/web/src/shared/` 提供前端共用 UI 與工具；根目錄的 `shared/` 提供前後端共用契約與純邏輯，透過 `@taiwan-fin-hub/shared` 引用。
+
 - `app` 負責組裝 feature 與 shared infrastructure。
 - `features` 可以依賴 `data`、`shared` 和純應用層型別，但不應直接依賴其他 feature 的內部元件。
-- `data` 可以依賴 `shared/api` 與 `packages/core`，不得依賴 UI feature。
+- `data` 可以依賴前端的 `shared/api` 與 `@taiwan-fin-hub/shared`，不得依賴 UI feature。
 - `shared` 不得依賴 feature；若工具只被一個 feature 使用，應放回該 feature 的 `model` 或 `components`。
-- 前後端都使用且穩定的 API contract 應逐步移到 `packages/core`；只用於前端組合畫面的 view model 可留在 `apps/web/src/data`。
+- 前後端都使用且穩定的 API contract 應逐步移到根目錄的 `shared/`；只用於前端組合畫面的 view model 可留在 `apps/web/src/data`。
+- 根目錄的 `shared/` 是唯一跨前後端共用的 workspace 套件；資料庫與連接器由 `apps/worker` 管理，前端不得引用 Worker 內部模組。
+
+銀行與信用卡帳單 API 的 response 契約定義於 `shared/bank-api.ts`，前端 `data/bank/types.ts` 僅提供既有名稱的 type re-export。Worker 在銀行 route 的 JSON 回傳處以 `satisfies` 檢查相同契約；欄位保留現有回應的 `null` 與帳單數值 flag，不將 connector 正規化資料或 ORM row 當作 API response 型別。資料來源 ID 保持現有回應的 string，catalog 的 `ConnectorId` 用於已驗證的 connector 註冊與操作。
 
 ## Svelte 檔案
 

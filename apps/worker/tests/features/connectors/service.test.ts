@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createTestD1 } from "../../../../../packages/db/testing/d1";
-import { getConnectorSettings } from "@taiwan-fin-hub/db";
+import { createTestD1 } from "../../helpers/d1";
+import { getConnectorSettings } from "../../../src/db";
 import { decryptJson, encryptJson } from "../../../src/platform/crypto";
 import type { Env } from "../../../src/platform/env";
 import {

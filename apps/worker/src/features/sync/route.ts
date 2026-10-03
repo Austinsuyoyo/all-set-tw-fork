@@ -1,18 +1,22 @@
+import { CtbcConnectionError } from "../../connectors/protocols/ctbc-mobile-api";
+import { EInvoiceProtocolUnavailableError } from "../../connectors/protocols/tw-einvoice-api";
 import {
-  CtbcConnectionError,
-  EInvoiceProtocolUnavailableError,
   ObankConnectionError,
   ObankProtocolError,
-  SkbankConnectionError,
-  SkbankProtocolError,
+} from "../../connectors/protocols/obank-mobile-api";
+import { SkbankConnectionError } from "../../connectors/protocols/skbank-mobile-api";
+import { SkbankProtocolError } from "../../connectors/protocols/skbank";
+import {
   TdccConnectionError,
   TdccVerificationRequiredError,
+} from "../../connectors/protocols/tdcc";
+import {
   MegabankConnectionError,
   MegabankOtpInvalidError,
   MegabankOtpRequiredError,
   MegabankProtocolError,
   MegabankVerificationRequiredError,
-} from "@taiwan-fin-hub/connectors";
+} from "../../connectors/protocols/megabank-mobile-api";
 import { zValidator } from "@hono/zod-validator";
 import { type Context, type Hono } from "hono";
 import { z } from "zod";
@@ -59,13 +63,15 @@ import {
   NextbankCaptchaRequiredError,
   safeErrorMessage,
   SyncAlreadyRunningError,
+} from "./errors";
+import {
   SYNC_SCOPE_ALL,
   TDCC_SCOPE_BANK,
   TDCC_SCOPE_INVESTMENTS,
   TDCC_SCOPE_TRADES,
-  withManualSyncLock,
   type SyncOutcome,
-} from "./service";
+} from "./types";
+import { withManualSyncLock } from "./service";
 import { prepareConnectorChallenge, runConnectorSync } from "./registry";
 import { cancelQueuedTdccSyncRun, startTdccSyncRun } from "./tdcc-sync-service";
 import { enqueueTdccSyncChunk } from "./scheduler-queue";

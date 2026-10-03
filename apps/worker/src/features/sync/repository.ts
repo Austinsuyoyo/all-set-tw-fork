@@ -2,10 +2,10 @@ import {
   createDrizzle,
   connectorSettings,
   sanitizeDatabaseError,
-} from "@taiwan-fin-hub/db";
+} from "../../db";
 import { eq } from "drizzle-orm";
 import { mergeLegacyTransactionStatements } from "./transaction-merge";
-import type { ConnectorId } from "@taiwan-fin-hub/core";
+import type { ConnectorId } from "@taiwan-fin-hub/shared";
 
 export async function updateConnectorEncryptedConfig(
   db: D1Database,

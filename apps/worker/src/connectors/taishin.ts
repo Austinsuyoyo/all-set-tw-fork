@@ -1,3 +1,4 @@
+import type { SyncResult } from "./types";
 import { BrowserRunCapacityError, launchBrowserWithRetry } from "./browser.js";
 import puppeteer, {
   type Browser,
@@ -6,14 +7,13 @@ import puppeteer, {
   type HTTPRequest,
   type HTTPResponse,
 } from "@cloudflare/puppeteer";
+import { BANK_SYNC_MONTHS } from "./protocols/sync-window";
+import { isNoCreditCardMessage } from "./protocols/credit-card-status";
 import {
-  BANK_SYNC_MONTHS,
-  isNoCreditCardMessage,
   parseTaishinCreditCardData,
   type TaishinConfig,
   type TaishinCreditCardPayloads,
-} from "@taiwan-fin-hub/connectors";
-import type { SyncResult } from "@taiwan-fin-hub/core";
+} from "./protocols/taishin";
 
 const RWD_URL = "https://my.taishinbank.com.tw/TIBNetBank/svc/rwd/index.html";
 const API_ROOT = "/TIBNetBank/svc";

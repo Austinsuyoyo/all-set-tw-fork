@@ -1,4 +1,4 @@
-import { sanitizeDatabaseError } from "@taiwan-fin-hub/db";
+import { sanitizeDatabaseError } from "../../db";
 import {
   activityDisplayAmount,
   activityDateKey,
@@ -10,7 +10,7 @@ import {
   type ActivityInvoice,
   type ActivityTrade,
   type SyncActivityDetail,
-} from "@taiwan-fin-hub/core";
+} from "@taiwan-fin-hub/shared";
 import {
   listBankAccounts,
   listBankTransactionsInRange,

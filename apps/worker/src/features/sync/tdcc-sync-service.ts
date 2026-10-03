@@ -5,25 +5,27 @@ import {
 } from "./activity-detail-repository";
 import {
   createTdccClient,
-  EPassbookError,
   ensureTdccSession,
   initializeTdccSnapshot,
-  normalizeBankTransactionDetails,
   normalizeTdccBankAuthorizedAt,
   normalizeTdccSnapshot,
   parseTdccConfig,
   parseTdccTradePageItems,
-  type BankTransactionDetail,
   type TdccConfig,
   type TdccCursorState,
   type TdccSnapshotInitialization,
   type TdccStockAccount,
-} from "@taiwan-fin-hub/connectors";
+} from "../../connectors/protocols/tdcc";
+import {
+  EPassbookError,
+  normalizeBankTransactionDetails,
+  type BankTransactionDetail,
+} from "../../connectors/protocols/tdcc-epassbook-client";
 import type {
   SyncNewRecordCounts,
   SyncNotificationStatus,
-} from "@taiwan-fin-hub/core";
-import { getConnectorSettings, nextSyncRunAt } from "@taiwan-fin-hub/db";
+} from "@taiwan-fin-hub/shared";
+import { getConnectorSettings, nextSyncRunAt } from "../../db";
 import { configEncryptionKey } from "../../platform/config";
 import { decryptJson, encryptJson } from "../../platform/crypto";
 import type { Env } from "../../platform/env";
@@ -72,8 +74,8 @@ import {
   NeedsUserActionError,
   safeErrorMessage,
   SyncAlreadyRunningError,
-  SYNC_LOCK_LEASE_MS,
-} from "./service";
+} from "./errors";
+import { SYNC_LOCK_LEASE_MS } from "./lock";
 import {
   serializePublicConnectorConfig,
   splitConnectorCursorState,

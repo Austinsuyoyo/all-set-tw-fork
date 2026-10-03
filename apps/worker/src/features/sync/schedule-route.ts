@@ -1,5 +1,5 @@
 import { getReportActivityDetails } from "./activity-detail-service";
-import { isConnectorId } from "@taiwan-fin-hub/core";
+import { isConnectorId } from "@taiwan-fin-hub/shared";
 import { zValidator } from "@hono/zod-validator";
 import type { Hono } from "hono";
 import { z } from "zod";

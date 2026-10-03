@@ -3,7 +3,7 @@ import {
   sanitizeDatabaseError,
   tdccSyncRuns,
   tdccSyncRunItems,
-} from "@taiwan-fin-hub/db";
+} from "../../db";
 import { and, asc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 
 /**

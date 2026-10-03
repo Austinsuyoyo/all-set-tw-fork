@@ -1,5 +1,5 @@
 import { type Browser, type Page } from "@cloudflare/puppeteer";
-import { BANK_SYNC_MONTHS } from "@taiwan-fin-hub/connectors";
+import { BANK_SYNC_MONTHS } from "./protocols/sync-window";
 import { type EsunTimelinePage, type EsunTimelineTransaction } from "./esun.js";
 
 const IESC_ORIGIN = "https://iesc.esunbank.com";

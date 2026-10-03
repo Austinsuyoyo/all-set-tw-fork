@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { createTestD1 } from "../../../../../packages/db/testing/d1";
+import { createTestD1 } from "../../helpers/d1";
 import {
   persistStagedSyncWrite,
   promoteStagedSyncWrite,

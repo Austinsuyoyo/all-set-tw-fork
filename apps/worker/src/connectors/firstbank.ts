@@ -1,3 +1,4 @@
+import type { SyncResult } from "./types";
 import { BrowserRunCapacityError, launchBrowserWithRetry } from "./browser.js";
 import puppeteer, {
   type Browser,
@@ -9,11 +10,10 @@ import puppeteer, {
 } from "@cloudflare/puppeteer";
 import {
   parseFirstbankData,
-  isNoCreditCardMessage,
   type FirstbankConfig,
   type FirstbankPayloads,
-} from "@taiwan-fin-hub/connectors";
-import type { SyncResult } from "@taiwan-fin-hub/core";
+} from "./protocols/firstbank";
+import { isNoCreditCardMessage } from "./protocols/credit-card-status";
 
 const ORIGIN = "https://ibank.firstbank.com.tw";
 const FRAME_URL = `${ORIGIN}/NetBank/frame.html`;

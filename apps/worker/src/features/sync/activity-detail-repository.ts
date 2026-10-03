@@ -5,14 +5,14 @@ import {
   syncActivityDetails,
   scheduledSyncBatchResults,
   scheduledSyncBatches,
-} from "@taiwan-fin-hub/db";
+} from "../../db";
 import { and, asc, desc, eq, isNotNull, sql } from "drizzle-orm";
 import {
   isConnectorId,
   type ConnectorId,
   type SyncActivityDetailsPage,
   type SyncActivityDetail,
-} from "@taiwan-fin-hub/core";
+} from "@taiwan-fin-hub/shared";
 
 export async function beginActivityRun(
   db: D1Database,

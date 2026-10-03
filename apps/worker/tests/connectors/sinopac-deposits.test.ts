@@ -3,12 +3,12 @@ import {
   fetchSinopacDeposits,
   parseSinopacDepositAccounts,
   parseSinopacDepositTransactions,
-} from "@taiwan-fin-hub/connectors";
+} from "../../src/connectors/protocols/sinopac-deposits";
 import {
   sinopacDepositAccounts,
   sinopacDepositTransactions,
   sinopacDepositNoTransactions,
-} from "../../../../packages/connectors/tests/fixtures/sinopac-deposits";
+} from "./fixtures/sinopac-deposits";
 
 describe("永豐活存查詢", () => {
   it("解析臺外幣活存餘額，保留零餘額且不加上綜存定存", () => {

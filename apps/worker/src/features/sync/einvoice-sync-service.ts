@@ -7,13 +7,15 @@ import {
   fetchEInvoiceInvoiceDetail,
   initializeEInvoiceSync,
   parseInvoiceConfig,
-  EInvoiceV2Client,
   type EInvoiceDetailTask,
-  type EInvoiceV2Session,
   type InvoiceConfig,
-} from "@taiwan-fin-hub/connectors";
-import type { SyncNotificationStatus } from "@taiwan-fin-hub/core";
-import { getConnectorSettings, nextSyncRunAt } from "@taiwan-fin-hub/db";
+} from "../../connectors/protocols/einvoice";
+import {
+  EInvoiceV2Client,
+  type EInvoiceV2Session,
+} from "../../connectors/protocols/tw-einvoice-v2";
+import type { SyncNotificationStatus } from "@taiwan-fin-hub/shared";
+import { getConnectorSettings, nextSyncRunAt } from "../../db";
 import { configEncryptionKey } from "../../platform/config";
 import { decryptJson, encryptJson } from "../../platform/crypto";
 import type { Env } from "../../platform/env";
@@ -50,8 +52,8 @@ import {
   safeErrorMessage,
   NeedsUserActionError,
   SyncAlreadyRunningError,
-  SYNC_LOCK_LEASE_MS,
-} from "./service";
+} from "./errors";
+import { SYNC_LOCK_LEASE_MS } from "./lock";
 
 export const EINVOICE_DETAIL_CHUNK_SIZE = 35;
 const EINVOICE_LEASE_MS = 3 * 60 * 1000;

@@ -3,7 +3,7 @@ import {
   sanitizeDatabaseError,
   einvoiceSyncRuns,
   einvoiceSyncRunItems,
-} from "@taiwan-fin-hub/db";
+} from "../../db";
 import { and, asc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 
 // 讀取以明確 selection 維持 snake_case DTO；寫入的 claim、JSON merge、
