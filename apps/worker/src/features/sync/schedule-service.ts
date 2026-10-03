@@ -1,5 +1,5 @@
-import type { ConnectorId } from "@taiwan-fin-hub/core";
-import { nextSyncRunAt, type SyncScheduleMode } from "@taiwan-fin-hub/db";
+import type { ConnectorId } from "@taiwan-fin-hub/shared";
+import { nextSyncRunAt, type SyncScheduleMode } from "../../db";
 import { getActiveEinvoiceRun } from "./einvoice-run-repository";
 import {
   findDefaultSyncSchedule,

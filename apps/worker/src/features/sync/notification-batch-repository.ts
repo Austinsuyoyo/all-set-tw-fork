@@ -13,14 +13,14 @@ import {
   scheduledSyncBatches,
   scheduledSyncBatchResults,
   einvoiceSyncRuns,
-} from "@taiwan-fin-hub/db";
+} from "../../db";
 import { and, asc, eq, isNull, isNotNull, lt, ne, or, sql } from "drizzle-orm";
 import type {
   ConnectorId,
   SyncNewRecordCounts,
   SyncNotificationStatus,
-} from "@taiwan-fin-hub/core";
-import type { SyncJobRow } from "@taiwan-fin-hub/db";
+} from "@taiwan-fin-hub/shared";
+import type { SyncJobRow } from "../../db";
 import type { SyncNotificationEvent } from "../notifications/payload";
 import {
   calculateCurrentFinancialSnapshot,

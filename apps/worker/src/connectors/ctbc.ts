@@ -1,7 +1,7 @@
 import {
   CtbcConnectionError,
   type CtbcFetch,
-} from "@taiwan-fin-hub/connectors";
+} from "./protocols/ctbc-mobile-api";
 import type { Env } from "../platform/env";
 
 type RelayFetch = typeof globalThis.fetch;

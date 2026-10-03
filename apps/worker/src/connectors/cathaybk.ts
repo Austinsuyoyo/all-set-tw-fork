@@ -1,3 +1,4 @@
+import type { SyncResult } from "./types";
 import { launchBrowserWithRetry } from "./browser.js";
 import puppeteer, {
   type Browser,
@@ -9,13 +10,10 @@ import type {
   BankBalanceSnapshot,
   BankTransaction,
   CreditCardBill,
-  SyncResult,
-} from "@taiwan-fin-hub/core";
-import {
-  BANK_SYNC_MONTHS,
-  isNoCreditCardMessage,
-  type CathaybkConfig,
-} from "@taiwan-fin-hub/connectors";
+} from "@taiwan-fin-hub/shared";
+import { BANK_SYNC_MONTHS } from "./protocols/sync-window";
+import { isNoCreditCardMessage } from "./protocols/credit-card-status";
+import { type CathaybkConfig } from "./protocols/cathaybk";
 
 const LOGIN_URL = "https://www.cathaybk.com.tw/MyBank/";
 const DEPOSIT_OVERVIEW_URL =

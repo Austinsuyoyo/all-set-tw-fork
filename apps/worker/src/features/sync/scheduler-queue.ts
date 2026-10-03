@@ -7,7 +7,7 @@ import {
   processEinvoiceSyncChunk,
 } from "./einvoice-sync-service";
 import { failTdccSyncRun, processTdccSyncChunk } from "./tdcc-sync-service";
-import { isUserActionError } from "./service";
+import { isUserActionError } from "./errors";
 
 const queueController = {
   cron: "queue:scheduled-sync",

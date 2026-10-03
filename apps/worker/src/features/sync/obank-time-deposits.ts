@@ -1,8 +1,5 @@
-import type {
-  BankAccount,
-  BankTransaction,
-  SyncResult,
-} from "@taiwan-fin-hub/core";
+import type { SyncResult } from "../../connectors/types";
+import type { BankAccount, BankTransaction } from "@taiwan-fin-hub/shared";
 import {
   bankBalanceSnapshotRecord,
   bankTransactionRecord,

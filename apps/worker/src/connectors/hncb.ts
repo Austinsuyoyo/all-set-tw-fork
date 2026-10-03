@@ -1,3 +1,4 @@
+import type { SyncResult } from "./types";
 import { BrowserRunCapacityError, launchBrowserWithRetry } from "./browser.js";
 import puppeteer, {
   type Browser,
@@ -5,12 +6,8 @@ import puppeteer, {
   type Frame,
   type Page,
 } from "@cloudflare/puppeteer";
-import {
-  isNoCreditCardMessage,
-  parseHncbData,
-  type HncbConfig,
-} from "@taiwan-fin-hub/connectors";
-import type { SyncResult } from "@taiwan-fin-hub/core";
+import { isNoCreditCardMessage } from "./protocols/credit-card-status";
+import { parseHncbData, type HncbConfig } from "./protocols/hncb";
 
 const LOGIN_URL =
   "https://netbank.hncb.com.tw/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.Login&state=prompt&Recognition=private";

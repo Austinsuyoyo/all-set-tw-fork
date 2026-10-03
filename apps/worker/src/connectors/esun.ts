@@ -1,3 +1,4 @@
+import type { SyncResult } from "./types";
 import { launchBrowserWithRetry } from "./browser.js";
 import {
   buildEsunCreditTimelinePages,
@@ -16,9 +17,9 @@ import type {
   BankBalanceSnapshot,
   BankTransaction,
   CreditCardBill,
-  SyncResult,
-} from "@taiwan-fin-hub/core";
-import { BANK_SYNC_MONTHS, type EsunConfig } from "@taiwan-fin-hub/connectors";
+} from "@taiwan-fin-hub/shared";
+import { BANK_SYNC_MONTHS } from "./protocols/sync-window";
+import { type EsunConfig } from "./protocols/esun";
 
 const HOME_URL = "https://ebank.esunbank.com.tw/indexMobile.jsp";
 const PORTAL_URL = "https://ebank.esunbank.com.tw/esb/";

@@ -6,9 +6,9 @@ import {
   createDrizzle,
   sanitizeDatabaseError,
   syncWriteStaging,
-} from "@taiwan-fin-hub/db";
+} from "../../db";
 import { eq, lt } from "drizzle-orm";
-import type { ConnectorId, SyncNewRecordCounts } from "@taiwan-fin-hub/core";
+import type { ConnectorId, SyncNewRecordCounts } from "@taiwan-fin-hub/shared";
 
 export type SyncEntityType =
   | "invoice"

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseRakutenDepositTransactions } from "@taiwan-fin-hub/connectors";
+import { parseRakutenDepositTransactions } from "../../src/connectors/protocols/rakuten-deposit-transactions";
 
 const ACCOUNT_NO = "0081200000001234";
 const ACCOUNT_SOURCE_ID = `bank:rakuten:${ACCOUNT_NO}:TWD`;

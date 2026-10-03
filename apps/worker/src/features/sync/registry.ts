@@ -1,47 +1,63 @@
-import { connectorCatalog, type ConnectorId } from "@taiwan-fin-hub/core";
-import type { SyncTrigger } from "@taiwan-fin-hub/db";
+import { connectorCatalog, type ConnectorId } from "@taiwan-fin-hub/shared";
+import type { SyncTrigger } from "../../db";
 import type { Env } from "../../platform/env";
 import {
   prepareSinopacCaptchaSession,
-  prepareHncbCaptchaSession,
-  prepareKgibankCaptchaSession,
-  prepareRakutenCaptchaSession,
-  prepareTaishinCaptchaSession,
-  prepareObankCaptchaSession,
-  prepareFirstbankCaptchaSession,
-  prepareMegabankCaptchaSession,
-  syncCathaybk,
-  syncCtbc,
-  syncSkbank,
-  syncEsun,
   syncSinopac,
+  type SinopacSyncOverrides,
+} from "./sources/sinopac";
+import {
+  prepareHncbCaptchaSession,
+  syncHncb,
+  type HncbSyncOverrides,
+} from "./sources/hncb";
+import {
+  prepareKgibankCaptchaSession,
+  syncKgibank,
+  type KgibankSyncOverrides,
+} from "./sources/kgibank";
+import {
+  prepareRakutenCaptchaSession,
+  syncRakuten,
+  type RakutenSyncOverrides,
+} from "./sources/rakuten";
+import {
+  prepareTaishinCaptchaSession,
+  syncTaishin,
+  type TaishinSyncOverrides,
+} from "./sources/taishin";
+import {
+  prepareObankCaptchaSession,
   syncObank,
+  type ObankSyncOverrides,
+} from "./sources/obank";
+import {
+  prepareFirstbankCaptchaSession,
+  syncFirstbank,
+  type FirstbankSyncOverrides,
+} from "./sources/firstbank";
+import {
+  prepareMegabankCaptchaSession,
+  syncMegabank,
+  type MegabankSyncOverrides,
+} from "./sources/megabank";
+import { syncCathaybk, type CathaySyncOverrides } from "./sources/cathaybk";
+import { syncCtbc } from "./sources/ctbc";
+import { syncSkbank } from "./sources/skbank";
+import { syncEsun } from "./sources/esun";
+import {
   syncNextbank,
   prepareNextbankCaptchaSession,
-  syncFirstbank,
-  syncHncb,
-  syncKgibank,
-  syncRakuten,
-  syncTaishin,
-  syncTdcc,
-  syncMegabank,
+} from "./sources/nextbank";
+import { syncTdcc, type TdccSyncOverrides } from "./sources/tdcc";
+import {
   SYNC_SCOPE_ALL,
   TDCC_SCOPE_BANK,
   TDCC_SCOPE_INVESTMENTS,
   TDCC_SCOPE_TRADES,
-  type SinopacSyncOverrides,
-  type ObankSyncOverrides,
-  type FirstbankSyncOverrides,
   type SyncOutcome,
   type SyncScope,
-  type HncbSyncOverrides,
-  type KgibankSyncOverrides,
-  type RakutenSyncOverrides,
-  type TaishinSyncOverrides,
-  type TdccSyncOverrides,
-  type CathaySyncOverrides,
-  type MegabankSyncOverrides,
-} from "./service";
+} from "./types";
 
 type ConnectorRuntimeDefinition = {
   run: (

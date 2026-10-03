@@ -5,7 +5,7 @@ import {
   sanitizeDatabaseError,
   scheduledSyncBatches,
   scheduledSyncBatchResults,
-} from "@taiwan-fin-hub/db";
+} from "../../db";
 import {
   and,
   desc,
@@ -24,7 +24,7 @@ import type {
   SyncFinancialChangeUnavailableReason,
   SyncNewRecordCounts,
   SyncNotificationStatus,
-} from "@taiwan-fin-hub/core";
+} from "@taiwan-fin-hub/shared";
 
 export type FinancialSnapshot = {
   assetsTwd: number;

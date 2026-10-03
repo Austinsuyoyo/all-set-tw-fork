@@ -1,4 +1,4 @@
-import { ctbcTransactionsMatch } from "@taiwan-fin-hub/connectors";
+import { ctbcTransactionsMatch } from "../../connectors/protocols/ctbc";
 import type { SyncWriteRecord } from "./persistence";
 
 type Row = Record<string, unknown> & {

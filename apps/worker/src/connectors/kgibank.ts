@@ -1,3 +1,4 @@
+import type { SyncResult } from "./types";
 import { BrowserRunCapacityError, launchBrowserWithRetry } from "./browser.js";
 import puppeteer, {
   type Browser,
@@ -12,8 +13,7 @@ import {
   parseKgibankAccounts,
   parseKgibankData,
   type KgibankConfig,
-} from "@taiwan-fin-hub/connectors";
-import type { SyncResult } from "@taiwan-fin-hub/core";
+} from "./protocols/kgibank";
 
 // 凱基網銀預設由 Workers AI 辨識圖形驗證碼；prepareKgibankCaptcha
 // 保留人工 fallback，會讓 sync 接回同一個 Browser session 送出登入。

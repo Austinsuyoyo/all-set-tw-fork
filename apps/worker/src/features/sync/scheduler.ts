@@ -1,5 +1,5 @@
 import { beginActivityRun } from "./activity-detail-repository";
-import type { ConnectorId } from "@taiwan-fin-hub/core";
+import type { ConnectorId } from "@taiwan-fin-hub/shared";
 import {
   acquireSyncJobLock,
   completeSyncJob,
@@ -8,17 +8,19 @@ import {
   releaseSyncJobLock,
   type SyncJobRow,
   type SyncStatus,
-} from "@taiwan-fin-hub/db";
+} from "../../db";
 import type { Env } from "../../platform/env";
 import {
   canonicalSyncLockRowId,
+  startSyncLockHeartbeat,
+  SYNC_LOCK_LEASE_MS,
+} from "./lock";
+import {
   isUserActionError,
   safeErrorLogDetails,
   safeErrorMessage,
-  startSyncLockHeartbeat,
-  SYNC_LOCK_LEASE_MS,
-  type SyncScope,
-} from "./service";
+} from "./errors";
+import { type SyncScope } from "./types";
 import { runConnectorSync } from "./registry";
 import {
   safelySendScheduledSyncSummary,

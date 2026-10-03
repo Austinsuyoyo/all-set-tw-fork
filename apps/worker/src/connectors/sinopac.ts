@@ -1,3 +1,4 @@
+import type { SyncResult } from "./types";
 import { BrowserRunCapacityError, launchBrowserWithRetry } from "./browser.js";
 import puppeteer, {
   type Browser,
@@ -10,15 +11,14 @@ import type {
   BankBalanceSnapshot,
   BankTransaction,
   CreditCardBill,
-  SyncResult,
-} from "@taiwan-fin-hub/core";
+} from "@taiwan-fin-hub/shared";
+import { BANK_SYNC_MONTHS } from "./protocols/sync-window";
 import {
-  BANK_SYNC_MONTHS,
   fetchSinopacDeposits,
   isSinopacDepositEmptyTransactions,
-  isNoCreditCardMessage,
-  type SinopacConfig,
-} from "@taiwan-fin-hub/connectors";
+} from "./protocols/sinopac-deposits";
+import { isNoCreditCardMessage } from "./protocols/credit-card-status";
+import { type SinopacConfig } from "./protocols/sinopac";
 
 const MOBILE_HOST = "https://m.sinopac.com";
 const LOGIN_URL = `${MOBILE_HOST}/m/member/login/m_login.aspx`;

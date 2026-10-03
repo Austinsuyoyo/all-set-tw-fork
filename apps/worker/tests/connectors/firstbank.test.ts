@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseFirstbankData } from "@taiwan-fin-hub/connectors";
+import { parseFirstbankData } from "../../src/connectors/protocols/firstbank";
 
 const NOW = new Date("2026-10-03T03:00:00Z");
 const ILEO_ACCOUNT = "112233445566";

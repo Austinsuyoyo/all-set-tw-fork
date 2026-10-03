@@ -7,15 +7,15 @@ import {
   syncJobConfiguredJoin,
   syncJobConfiguredSelection,
   syncJobSelection,
-} from "@taiwan-fin-hub/db";
+} from "../../db";
 import { and, asc, eq, sql } from "drizzle-orm";
 import type {
   SyncJobRow,
   SyncScheduleMode,
   SyncStatus,
   SyncTrigger,
-} from "@taiwan-fin-hub/db";
-import type { ConnectorId } from "@taiwan-fin-hub/core";
+} from "../../db";
+import type { ConnectorId } from "@taiwan-fin-hub/shared";
 
 export type DefaultSyncSchedule = {
   intervalMinutes: number;
