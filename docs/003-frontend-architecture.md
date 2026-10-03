@@ -10,7 +10,6 @@ apps/web/src/
 ├── data/      # 依 API resource 分組的 query options 與 response DTO
 ├── features/  # 依使用者功能分組的頁面、元件與 feature model
 ├── shared/    # 無 feature 所屬的 UI、API client、格式化、state 與 actions
-├── testing/   # 跨測試共用的 setup、fixture 與 render helper
 ├── main.ts
 └── styles.css
 ```
@@ -26,15 +25,19 @@ apps/web/src/
 ## Svelte 檔案
 
 - 頁面入口命名為 `*Page.svelte`，feature 專用子元件放在相鄰的 `components/`。
-- 純計算、mapping 和 filtering 放在一般 `.ts`，並以單元測試覆蓋。
+- 純計算、mapping 和 filtering 放在一般 `.ts`；金融計算依下方測試政策保留必要驗證。
 - 只有需要在元件外使用 runes 的共享 reactive state 才使用 `.svelte.ts`。
 - 全域 reactive state 應保持少量且明確；server state 由 TanStack Svelte Query 管理。
 
 ## 測試
 
-- Vitest 單元測試及元件測試與被測檔案 colocate，命名為 `*.test.ts`。
+- Vitest 金融計算測試與被測檔案 colocate，命名為 `*.test.ts`，使用 Node environment。
 - Playwright browser tests 放在 `apps/web/e2e`，命名為 `*.spec.ts`。
-- 共用測試初始化放在 `apps/web/src/testing`。
+- 單元測試只保留淨資產／負債符號、幣別換算、缺少匯率、配對去重與使用者排除後的金額結果。
+- E2E 保留資產清冊與手動資產、銀行手動驗證、活動排除／恢復、發票配對／解除及資料載入失敗重試。每個流程選一個 viewport，不另建元件測試重複驗證。
+- E2E 以模擬 API 驗證真實頁面互動；不代表銀行登入或後端資料寫入已通過整合驗證。
+- 不為 UI 包裝、固定文案、樣式、導覽內部狀態或一般 mapping／filtering 建立測試；可透過型別檢查、建置與實際操作確認。
+- 新測試須能說明它防止哪個金額錯誤、資料損壞、安全問題或主要流程失效。以既有核心測試擴充為優先，不以 coverage 或案例數作為目標；完整原則見後端文件的「測試與驗證」。
 
 ## Imports
 

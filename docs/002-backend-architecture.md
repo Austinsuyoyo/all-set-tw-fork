@@ -258,7 +258,7 @@ Feature-specific 查詢應放在 feature 的 `repository.ts`，而不是持續�
 packages/db/migrations/
 ```
 
-管理，不得由 `GET` API 在執行期間自動建立，也不得對正式環境使用 `drizzle-kit push`。Schema 比對測試以 migration 重播結果為準；隔離 D1 整合測試使用 Miniflare／workerd binding，不連線正式資料庫。
+管理，不得由 `GET` API 在執行期間自動建立，也不得對正式環境使用 `drizzle-kit push`。隔離 D1 整合測試以 Miniflare／workerd binding 按順序重播 migrations，不連線正式資料庫。
 
 ### Drizzle 與原生 SQL 維護約定
 
@@ -266,23 +266,22 @@ packages/db/migrations/
 複雜 CTE、window function、set-based upsert 或跨檔案組合的 D1 batch，
 以可讀性與保留原子性為準，保留原生 SQL 並註明理由。
 
-| 保留範圍                                            | 原因與主要驗證                                                                                                                                                                                                                |
-| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| staging JSON upsert、promotion 與 lifecycle 合併    | 保留批次參數數量、ENTITY_ORDER、count offset、cursor／finalize／cleanup 的同一 batch。`persistence.test.ts`、identity migration tests、`preference-fk-reconciliation.test.ts`、`drizzle-runtime.test.ts` 驗證資料保留及回滾。 |
-| einvoice／TDCC durable item 寫入與 create-or-get    | 保留 item claim、JSON merge、計數、設定版本 CAS 及 partial unique conflict 處理。run repository 與 sync service tests 驗證重送與結案。                                                                                        |
-| schedule／notification batch／report 寫入及財務 CTE | 保留固定成員快照、notification claim、報告修復及跨資產最新值／缺幣計算。notification batch、report repository 與 scheduler tests 驗證。                                                                                       |
+| 保留範圍                                            | 原因與驗證重點                                                                                                                                                              |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| staging JSON upsert、promotion 與 lifecycle 合併    | cursor／finalize／cleanup 必須在同一 batch。`persistence.test.ts`、`preference-fk-reconciliation.test.ts`、`drizzle-runtime.test.ts` 以隔離 D1 驗證去重、使用者決定與回滾。 |
+| einvoice／TDCC durable item 寫入與 create-or-get    | 保留 item claim、JSON merge、計數、設定版本 CAS 及 partial unique conflict 處理。以共用 lease 與發票 promotion 核心案例驗證並行與重送。                                     |
+| schedule／notification batch／report 寫入及財務 CTE | 保留固定成員快照、notification claim、報告修復及跨資產最新值／缺幣計算；不因統一語法改變這些行為。                                                                          |
 
 Lease acquisition／renewal 維持單次條件 UPDATE 與 affected rows 判斷，
 不得拆成 SELECT 後 UPDATE；不得用循序 await 或 Promise.all 取代原子 batch。
-查詢調整須保留 expression index 的可用性，以既有 EXPLAIN QUERY PLAN 測試確認。
+查詢調整須保留 expression index 的可用性；涉及查詢效能時以 EXPLAIN QUERY PLAN 確認。
 
 SQL migrations 是 schema 權威，由 Wrangler 管理套用與 migration ledger；
-不導入 Drizzle Kit 生成／套用 migration 流程。現有 Kit devDependency 僅供
-`packages/db/tests/schema.test.ts` 的隔離 schema 比對，不使用 push 同步資料庫。
-比對須涵蓋 FK、CHECK、generated column、nullable、default、unique 與索引語意。
+不導入 Drizzle Kit 生成／套用 migration 流程，也不另維護 schema 比對測試。
+Schema 修改時依實際影響驗證 migration 與 FK、CHECK、generated column、unique 等約束。
 
 Drizzle repository 整合測試使用 `packages/db/testing/d1.ts` 的 Miniflare／workerd D1，
-驗證回傳 shape、NULL、排序及 batch 回滾；既有 SQLite adapter 僅用於其能正確模擬的測試。
+聚焦資料完整性、安全與 batch 回滾，不為一般 CRUD、row shape 或排序逐項建檔。
 直接 import Drizzle 的 workspace 應自行宣告相依，不依賴 npm hoisting。
 
 ### 交易與發票偏好的參照完整性
@@ -629,7 +628,7 @@ Connector 不得直接寫入金融資料表。
 - Table、columns 與 conflict columns。
 - Record mapper。
 - D1 migration。
-- 對應測試。
+- 涉及四類核心風險時擴充既有測試。
 
 ## 排程同步活動明細
 
@@ -666,7 +665,7 @@ Connector 不得直接寫入金融資料表。
 4. 有 SQL 時建立 `repository.ts`。
 5. 在 `apps/worker/src/index.ts` 註冊 feature routes。
 6. Schema 有變更時新增 D1 migration。
-7. 為 service、repository 或 route 的主要行為新增測試。
+7. 判斷是否引入下方四類核心風險，必要時擴充既有測試；不要求每個 feature 各自建立測試。
 
 不要先建立抽象 interface，再尋找使用情境。只有出現實際重複或替換需求時才抽象。
 
@@ -681,7 +680,7 @@ Connector 不得直接寫入金融資料表。
 5. 在 `connectorRuntimeRegistry` 註冊手動／排程同步與 challenge handler。
 6. 前端使用受 `ConnectorFormFieldKey` 約束的欄位，不得重複維護 connector 顯示 metadata。
 7. 透過 migration 建立預設停用的 `all` sync job。
-8. 完成 registry completeness、state boundary、parser、session lifecycle、route、scheduler 與 synthetic self-check。
+8. 依四類核心風險完成必要驗證，不逐層建立相同行為的模擬測試。
 
 Route 與 scheduler 應透過 runtime registry dispatch，不再新增 connector-specific switch。
 
@@ -689,25 +688,30 @@ Connector 回傳的 `raw` 資料只供診斷與未來 migration 使用，不得�
 
 ## 測試與驗證
 
-提交後端架構或 connector 變更前，至少執行：
+提交前從 repo root 依 `AGENTS.md` 執行格式、型別與此次變更適用的核心測試：
 
 ```bash
+npm run format:check
 npm run typecheck
 npm run test:backend
 npm run test:unit
-npm run test:e2e
-npm run build
 ```
 
-測試責任：
+影響前端主要流程時執行 `npm run test:e2e`；建置設定或相依變更時執行 `npm run build`。
 
-- Worker feature、service 與 HTTP 行為：`@taiwan-fin-hub/worker` tests。
-- 共用 D1 helpers 與 sync job：`@taiwan-fin-hub/db` tests。
-- Connector protocol、parser 與 synthetic check：`@taiwan-fin-hub/connectors` self-check。
-- Web component 與 client logic：Web unit tests。
-- 使用者主要操作流程：Web E2E tests。
+只保留四類核心保障：
 
-新增 connector 行為時，不得只新增無人執行的測試腳本；必須接入 `packages/connectors` 的 `test:selfcheck` 或正式 test command。
+| 保障         | 主要驗證                                                                                                                                               |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 金融數字     | 已確認來源語意的 parser fixture，以及前端金額計算；欠款／溢繳符號、幣別、未知值、配對去重。                                                            |
+| 資料完整性   | 隔離 D1 的同步重送、pending → posted、使用者決定保留、失敗回滾與 cursor 原子更新。                                                                     |
+| 憑證與授權   | 真實加密與 JWT 驗章、公開資料與錯誤不含秘密、設定變更清除 session、舊同步不能覆蓋新憑證或資料；保留部署 secrets 與上游同步不覆蓋使用者變更的少量案例。 |
+| 主要操作流程 | Web E2E 的資產、銀行驗證、活動排除、發票配對與失敗重試；每個流程選一個 viewport。                                                                      |
+
+`test:backend` 執行 Worker 核心測試、DB 錯誤消毒測試與部署／Git 安全案例；connector parser 一併由 Worker 執行，不再維護 self-check。Web unit 只保留金融計算，UI 互動以少量 E2E 驗證。
+
+新增測試前先說明錯誤的使用者結果與獨立預期來源；優先擴充現有核心案例。同一行為選一個主要驗證層，不追求 coverage、測試數量、每個函式或每個分支都有測試。
+一般 CRUD、轉送、固定文字／樣式、銀行 DOM 與事件順序、已完成歷史 migration 不另建立回歸套件。型別檢查、建置與適用的實際操作仍須完成；核心測試通過不等同所有銀行登入與帳務都已驗證。
 
 ## 維護原則
 

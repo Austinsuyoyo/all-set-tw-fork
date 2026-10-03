@@ -40,7 +40,8 @@
 - HTTP concerns 放在 `route.ts`，use case 與商業流程放在 `service.ts`，feature 專用資料存取放在 `repository.ts`；一般 CRUD 預設使用 Drizzle。
 - 共用 API contract 與金融資料型別放在 `packages/core`，不得混入 Hono `Context`、D1 row 或 Puppeteer object。
 - 前端採 feature-first 結構；`features` 可依賴 `data` 與 `shared`，`data`、`shared` 不得反向依賴 feature。
-- 前端單元及元件測試與實作 colocate；Playwright browser tests 放在 `apps/web/e2e`。
+- 前端金融計算測試與實作 colocate；主要操作流程的 Playwright tests 放在 `apps/web/e2e`。
+- 自動測試只保留金融數字、資料完整性、憑證／授權與主要操作流程四類核心保障；優先擴充既有案例，不要求每個功能、函式或分層都有測試，也不維護獨立 self-check。詳細原則見後端文件的「測試與驗證」。
 - 修改前依下方「文件閱讀與維護」對照表閱讀相關文件。
 
 ## 常用驗證指令

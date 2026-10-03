@@ -29,7 +29,7 @@ Connector 採三層 registry：
 | `browser_session`         | Browser 只負責登入，後續使用可復用的 HTTP session        | 玉山                             |
 | `browser_captcha_session` | Browser 登入含 CAPTCHA，可由 AI 或人工完成並復用 session | 永豐、台新、華南、第一銀行、凱基 |
 
-不要為單一銀行建立新的通用框架。只有登入生命週期真的不同時才新增 mode，並同時補上 catalog 說明及共同測試。
+不要為單一銀行建立新的通用框架。只有登入生命週期真的不同時才新增 mode，並同時補上 catalog 說明；新增核心風險時才擴充共同測試。
 
 ## 設定與狀態分級
 
@@ -131,21 +131,16 @@ session 忙碌，原有專屬 API 錯誤碼仍供這些情境使用。session �
 - 若外部服務支援接管其他登入中的裝置，必須明確定義手動與排程的 `force` policy，並在介面與使用文件提示可能中斷使用者目前的工作階段。
 - 新 connector 必須透過 D1 migration 建立 `<connectorId>:all` sync job，預設停用。
 
-## 測試最低要求
+## 核心驗證
 
-每個 connector 至少需要：
+不再要求每個 connector 各自建立 config、parser、session、route、scheduler 與 self-check 全套測試。依後端文件的四類核心保障，只針對本次新增的風險擴充既有案例：
 
-1. Config schema 正常與錯誤案例。
-2. 外部 response fixture parser 測試。
-3. Stable `sourceId` 與重複同步去重測試。
-4. 金額方向、日期與 pending／posted lifecycle 測試。
-5. Session 復用、失效、credential change cleanup 測試。
-6. OTP／CAPTCHA／rate limit 等 typed error 測試（適用時）。
-7. Route manual sync 與 scheduler dispatch 測試。
-8. Cursor 不含 secret、encrypted config 不含 public field 的 state boundary 測試。
-9. Synthetic self-check，並接入 `test:selfcheck` 或正式 test command。
+- 金額、繳款狀態與交易方向：先以銀行實際畫面或已確認欄位語意建立預期，再保存去識別化 response fixture。可替換帳號與金額，但不可從 parser 的輸出倒推預期；合成 fixture 本身不能證明銀行欄位語意。
+- 同步去重、入帳與使用者決定：以共用 persistence 的隔離 D1 測試確認最後資料，不重複模擬每家銀行的相同寫入流程。
+- 憑證安全：驗證公開設定／cursor 不含秘密、帳密變更清除舊 session，以及舊同步不能覆蓋新設定。
+- 使用者驗證流程：以少量 E2E 代表案例確認，不窮舉銀行 DOM、frame、事件順序或同類錯誤碼。
 
-`apps/worker/tests/features/sync/registry.test.ts` 會檢查 catalog、config schema 與 Worker runtime 是否完整；不得以 type assertion 或 fallback entry 規避。
+自動測試統一接入正式 test command，不另維護 self-check 腳本。Catalog、config schema 與 runtime 的註冊完整性由既有型別契約與實作審查確認，不以 type assertion 或 fallback entry 規避。
 
 ## 新增流程
 
@@ -157,17 +152,18 @@ session 忙碌，原有專屬 API 錯誤碼仍供這些情境使用。session �
 5. 在 Worker runtime registry 註冊 sync／challenge handler。
 6. 在前端新增受 `ConnectorFormFieldKey` 約束的表單欄位與必要 challenge UI。
 7. 新增 sync job migration。
-8. 完成上述最低測試並更新 `README.md` 支援資料來源表。
+8. 依上述核心風險完成必要驗證，並更新 `README.md` 支援資料來源表。
 9. 執行：
 
 ```bash
+npm run format:check
 npm run typecheck
 npm run test:backend
 npm run verify:web
 npm run build
 ```
 
-若新增的是全新資料 entity，還必須同步更新 core contract、D1 migration、`SyncEntityType`、promotion order、entity config、record mapper 與 persistence test。
+若新增的是全新資料 entity，還必須同步更新 core contract、D1 migration、`SyncEntityType`、promotion order、entity config 與 record mapper；涉及資料完整性的新風險時擴充 persistence test。
 
 ## 各來源特殊行為
 
