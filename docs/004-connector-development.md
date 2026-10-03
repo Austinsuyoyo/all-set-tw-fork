@@ -6,13 +6,15 @@
 
 Connector 採三層 registry：
 
-| 層級            | 位置                                                                                  | 責任                                                  |
-| --------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| 共用 catalog    | `shared/connector-catalog.ts` 的 `connectorCatalog`                                   | ID、顯示名稱、連接模式、scope、資料能力、設定欄位分類 |
-| Config registry | `apps/worker/src/connectors/protocols/config-registry.ts` 的 `connectorConfigSchemas` | Zod schema 與設定解析                                 |
-| Worker runtime  | `apps/worker/src/features/sync/registry.ts` 的 `connectorRuntimeRegistry`             | 手動／排程同步與互動式 challenge handler              |
+| 層級            | 位置                                                                      | 責任                                                  |
+| --------------- | ------------------------------------------------------------------------- | ----------------------------------------------------- |
+| 共用 catalog    | `shared/connector-catalog.ts` 的 `connectorCatalog`                       | ID、顯示名稱、連接模式、scope、資料能力、設定欄位分類 |
+| Config registry | `apps/worker/src/sources/config-registry.ts` 的 `connectorConfigSchemas`  | Zod schema 與設定解析                                 |
+| Worker runtime  | `apps/worker/src/features/sync/registry.ts` 的 `connectorRuntimeRegistry` | 手動／排程同步與互動式 challenge handler              |
 
 `ConnectorId` 由 `connectorCatalog` 的 key 推得；catalog 每筆 `id` 必須與 key 相同。Config 與 Worker runtime registry 都必須以 `Record<ConnectorId, ...>` 宣告，新增 catalog 項目後，TypeScript 應立即指出尚未補齊的 config 或 runtime。
+
+各來源的同步、connector、protocol、API client 與專用配對／修復集中於 `apps/worker/src/sources/<connectorId>`。電子發票與集保使用該目錄的 `sync.ts`／`run-repository.ts` 執行 Queue 分段同步；runtime registry 的 `run` 拒絕單次呼叫，避免繞過 durable run 的進度與鎖。手動同步控制、排程、報告與共用資料寫入仍位於 `features/sync`。
 
 前端資料來源名稱與顯示順序由 `connectorCatalog` 產生；表單欄位 key 必須符合 catalog 宣告的 credential 或 public field，不得使用未受型別限制的任意字串。新增 connector 應加在 catalog 末尾。
 
@@ -56,7 +58,7 @@ Connector 採三層 registry：
 
 ## Config schema
 
-每個 connector 在 `apps/worker/src/connectors/protocols` 提供：
+每個 connector 在 `apps/worker/src/sources/<connectorId>/protocol.ts` 提供設定 schema 與解析，並在 `sources/config-registry.ts` 註冊：
 
 1. `<connectorId>ConfigSchema`。
 2. `<ConnectorId>Config` inferred type。
@@ -67,25 +69,25 @@ Schema 需要涵蓋同步期間會持久化的 secret state，否則 Zod parse �
 
 ## Protocols 與 Worker adapter 邊界
 
-`apps/worker/src/connectors/protocols` 可包含：
+同一來源目錄保留明確的責任邊界。`protocol.ts` 與純 API client 可包含：
 
 - 外部 API client。
 - Signing、encryption、protocol parsing。
 - Config schema 與 response normalization。
 - 不依賴 Worker binding 的 connector。
 
-`apps/worker/src/connectors` 根目錄放需要下列 runtime object 的 adapter：
+來源的 `connector.ts` 放需要下列 runtime object 的 adapter；只使用純 HTTP client 的來源不必建立這個檔案：
 
 - `BROWSER`、Puppeteer page 或 browser lifecycle。
 - `AI` CAPTCHA recognition。
 - Worker-specific session acquisition 或 capacity handling。
 
-`protocols/` 與 adapter 都由 Worker workspace 管理；protocols 不得依賴 Hono、D1、Worker `Env` 或 adapter，也不得直接寫入資料庫。Connector 測試與 fixtures 統一放在 `apps/worker/tests/connectors/`，由 `npm run test:backend` 執行。
+Protocol／client 不得依賴 Hono、D1、Worker `Env`、adapter 或 `sync.ts`，也不得直接寫入資料庫；adapter 不直接讀寫 D1。`sync.ts` 負責呼叫它們，並組合共用 persistence 與來源 repository。來源不引用另一來源的內部實作。Connector 測試與 fixtures 放在 `apps/worker/tests/sources/<connectorId>/`，由 `npm run test:backend` 執行；跨來源的同步完整性測試留在 `tests/features/sync`。
 
-電子發票的 config、同步 primitive 與正規化實作位於 `protocols/einvoice.ts`；各來源的 config 註冊集中於 `protocols/config-registry.ts`。`protocols/index.ts` 僅提供匯出，Worker 與測試直接引用需要的來源模組，避免經由大型入口載入其他來源的實作。
+電子發票的 config、同步 primitive 與正規化實作位於 `sources/einvoice/protocol.ts`，API client 位於同一目錄；各來源的 config 註冊集中於 `sources/config-registry.ts`。Worker 與測試直接引用需要的來源檔案，不使用跨來源的實作匯出入口。
 
 所有 Browser adapter 建立新瀏覽器時，統一呼叫
-`apps/worker/src/connectors/browser.ts` 的 `launchBrowserWithRetry`，不得直接呼叫
+`apps/worker/src/sources/browser.ts` 的 `launchBrowserWithRetry`，不得直接呼叫
 `puppeteer.launch`。共用 adapter 在 binding `fetch` 層僅針對建立瀏覽器的
 `POST /v1/devtools/browser` 請求依 HTTP status `503` 判斷重試，不比對錯誤文案。
 預設等待 2 秒、5 秒後重試，最多嘗試 3 次；`503` 耗盡後保留原始錯誤。
@@ -104,7 +106,7 @@ session 忙碌，原有專屬 API 錯誤碼仍供這些情境使用。session �
 ## 正規化資料契約
 
 - Connector 回傳 `SyncResult`，資料必須符合 `@taiwan-fin-hub/shared`。
-- `Connector` 與 `SyncResult` 定義於 Worker 的 `src/connectors/types.ts`；其中的金融資料使用 shared 的正規化型別，與銀行 API response 契約分開。
+- `Connector` 與 `SyncResult` 定義於 Worker 的 `src/sources/types.ts`；其中的金融資料使用 shared 的正規化型別，與銀行 API response 契約分開。
 - `sourceId` 必須在重複同步間穩定。一般交易不得使用本次同步時間產生 ID。
 - `BankBalanceSnapshot.accountId`、`BankTransaction.accountId` 與 `CreditCardBill.accountId` 必須等於對應 `BankAccount.sourceId`。
 - 日期使用 ISO 8601；帳單期間使用 `YYYY-MM`；幣別使用大寫代碼。
@@ -120,7 +122,7 @@ session 忙碌，原有專屬 API 錯誤碼仍供這些情境使用。session �
 
 - 沒有信用卡是正常的產品資格狀態。同時支援存款的 connector 繼續回傳存款；僅支援信用卡的台新回傳空的金融資料，手動與排程都正常完成同步並更新 cursor。
 - 只有明確持卡旗標、可確認無卡的完整清單或無卡提示才能略過信用卡流程。沒有帳單／消費、缺少清單、HTTP 失敗、session 失效與未知錯誤，不得直接當成無卡；既有可選資料的降級規則維持原行為。
-- `apps/worker/src/connectors/protocols/credit-card-status.ts` 的 `isNoCreditCardMessage` 只辨識以無卡敘述開頭的訊息，排除條件式申請說明；可移除銀行原生 alert 的四位數代碼前綴，但不依該代碼判定無卡。各銀行只能在信用卡階段與對應端點套用，不在共用 service 吞掉錯誤。
+- `apps/worker/src/sources/credit-card-status.ts` 的 `isNoCreditCardMessage` 只辨識以無卡敘述開頭的訊息，排除條件式申請說明；可移除銀行原生 alert 的四位數代碼前綴，但不依該代碼判定無卡。各銀行只能在信用卡階段與對應端點套用，不在共用 service 吞掉錯誤。
 - 無卡時信用卡帳戶、餘額、交易與帳單為空，不建立零餘額，不刪除先前的金融歷史資料。第一銀行、台新的 `hasCreditCard: false` 是本次擷取結果，並非使用者設定或需要持久化的產品偏好。
 - 無卡文案分支使用去識別的合成 fixture 驗證；目前新增的中信與台新分支尚未以真實無卡帳號驗證（第一銀行的會員登出頁分支已以真實無卡帳號確認），不將合成錯誤代碼視為銀行正式代碼。
 
@@ -148,9 +150,9 @@ session 忙碌，原有專屬 API 錯誤碼仍供這些情境使用。session �
 ## 新增流程
 
 1. 在 `connectorCatalog` 加入 ID、mode、scope、capabilities 與欄位分類。
-2. 在 `apps/worker/src/connectors/protocols` 建立 config、client、parser，並在 `config-registry.ts` 註冊 config schema。
-3. 需要 binding 時，在 `apps/worker/src/connectors` 建立 adapter。
-4. 在 `apps/worker/src/features/sync/sources/<connectorId>.ts` 實作單次同步與 challenge use case，使用既有 record mapping 與 staged persistence；需分段續跑的來源則沿用 durable sync service 模式。
+2. 在 `apps/worker/src/sources/<connectorId>` 建立 `protocol.ts`、必要的 client 與 parser，並在 `sources/config-registry.ts` 註冊 config schema。
+3. 需要 binding 時，在同一來源目錄建立 `connector.ts` adapter。
+4. 在同一來源目錄的 `sync.ts` 實作單次同步與 challenge use case，使用 `features/sync` 的共用 record mapping 與 staged persistence；需分段續跑的來源則沿用 durable sync 與 `run-repository.ts` 模式。來源專用的配對、存款生命週期與舊資料修復放在相鄰檔案。
    若來源提供直接存款帳戶，確認 `DIRECT_DEPOSIT_CONNECTOR_IDS` 是否需加入，以連結集保交割帳戶。
 5. 在 Worker runtime registry 註冊 sync／challenge handler。
 6. 在前端新增受 `ConnectorFormFieldKey` 約束的表單欄位與必要 challenge UI。
@@ -260,7 +262,7 @@ Migration `0043_merge_legacy_invoice_duplicates.sql` 以相同發票號碼整併
 
 #### 臺外幣活存
 
-- 純查詢與解析邏輯位於 `apps/worker/src/connectors/protocols/sinopac-deposits.ts`，Worker adapter 沿用 App JSON transport 與加密 session，不保存新的帳密或 session 欄位。
+- 純查詢與解析邏輯位於 `apps/worker/src/sources/sinopac/deposit-protocol.ts`，Worker adapter 沿用 App JSON transport 與加密 session，不保存新的帳密或 session 欄位。
 - 以 POST `/ws/bank/bankbal/ws_bankbal.ashx` 的 `SubInfo` 取得各帳戶與幣別；`AvailBalInt` 為活存餘額、`MaxAvail` 為可用餘額。零餘額仍建立帳戶與快照，`FixBalance` 的綜存定存不納入本次活存範圍。
 - 每個帳戶依序 POST `/ws/bank/transdetail/ws_transdetailMerge.ashx`，form 欄位為 `AcctValue`、`Curr`、`QueryType=3`、`StartDate`、`EndDate`。日期格式為 `YYYYMMDD`，依臺灣當日回溯 `BANK_SYNC_MONTHS`（三個月），月底取目標月份最後一天。
 - `DataText4` 保留銀行提供的金額正負號。`DataText1` 為交易日期／時間，僅有日期時不補午夜；`DataText2` 是計息日，只存於白名單 raw，不用作入帳日。HTML 先去除再正規化，摘要與備註中的完整帳號／身分證字號須遮罩。
@@ -410,7 +412,7 @@ Migration `0043_merge_legacy_invoice_duplicates.sql` 以相同發票號碼整併
 - 樂天每次同步都需要 4 位英數圖形驗證碼，並重新以 Browser Run 登入（`browser_captcha_session`，但不復用 session）。手動與排程同步預設以 Workers AI 自動辨識，只有「驗證碼錯誤」（含辨識結果長度或字元不符）會重試，最多三次；連續失敗、辨識服務不可用或剩餘時間不足時拋出 `ManualCaptchaRequiredError`（HTTP 400 `MANUAL_CAPTCHA_REQUIRED`），標記 `needs_user_action`，前端接著呼叫 `prepareChallenge` 取得人工驗證碼。人工驗證碼有效時優先使用，逾時則退回自動辨識。
 - 同步臺幣活存帳戶、每日餘額快照與臺幣活存交易明細。登入後由頁面在載入前注入的攔截器讀取網頁自己解密後的首頁 API（`CHMQU0001`）回應，取不到時才改讀「臺幣存款」頁面文字。存款採白名單：只接受主帳號或明確標示為樂天（銀行代碼 826）的臺幣帳戶，他行、外幣與轉入對手帳號一律排除；解析不到存款視為頁面結構改變並整次失敗。
 - 餘額快照 `sourceId` 帶上 UTC 日期（`snapshot:rakuten:<帳號>:TWD:YYYY-MM-DD`），每天保留一筆，同一天多次同步只覆寫當天那筆。
-- 臺幣活存明細在首頁存款讀取完成後才進行：點頁首選單「存款」→「臺幣存款」，讀取頁面攔截到的 `CTWQU0001/010`（當月）回應；再開頁面的月份下拉選單，依按鈕顯示的當月往前選月份，讀取 `CTWQU0001/011` 回應，共取 `BANK_SYNC_MONTHS`（3）個月。下拉按鈕與選項由 Angular 在回應到達後才渲染，找不到時每 200 毫秒重試、最多等 3 秒，且不得點彈出視窗裡的元素。每月的 `txDetails` 由 `apps/worker/src/connectors/protocols/rakuten-deposit-transactions.ts` 解析：`amt` 沒有正負號、`amtSign` 語意也沒有保證，因此收支方向由相鄰兩筆交易後餘額的差推得，每月最舊一筆沒有前筆可比，只有在其他筆的餘額差與 `amtSign` 一致印證時才採用 `amtSign`，仍得不到方向的月份整月略過而不猜測。交易 `sourceId` 以 17 碼 `pk` 為主，沒有時才以日期、時間、金額、類型與餘額組合，交易對象若有非數字的約定帳號暱稱就用暱稱，否則對手帳號只保留末四碼（`****1234`），不寫入完整帳號；備註夠短才附在交易類型後。目前尚未實作分頁：回應標示 `dataEnd === false` 或 `dataLimit === true` 時保留已回傳的資料並記錄 `rakuten_tx_truncated`；沒有交易的月份不算截斷。
+- 臺幣活存明細在首頁存款讀取完成後才進行：點頁首選單「存款」→「臺幣存款」，讀取頁面攔截到的 `CTWQU0001/010`（當月）回應；再開頁面的月份下拉選單，依按鈕顯示的當月往前選月份，讀取 `CTWQU0001/011` 回應，共取 `BANK_SYNC_MONTHS`（3）個月。下拉按鈕與選項由 Angular 在回應到達後才渲染，找不到時每 200 毫秒重試、最多等 3 秒，且不得點彈出視窗裡的元素。每月的 `txDetails` 由 `apps/worker/src/sources/rakuten/deposit-transactions.ts` 解析：`amt` 沒有正負號、`amtSign` 語意也沒有保證，因此收支方向由相鄰兩筆交易後餘額的差推得，每月最舊一筆沒有前筆可比，只有在其他筆的餘額差與 `amtSign` 一致印證時才採用 `amtSign`，仍得不到方向的月份整月略過而不猜測。交易 `sourceId` 以 17 碼 `pk` 為主，沒有時才以日期、時間、金額、類型與餘額組合，交易對象若有非數字的約定帳號暱稱就用暱稱，否則對手帳號只保留末四碼（`****1234`），不寫入完整帳號；備註夠短才附在交易類型後。目前尚未實作分頁：回應標示 `dataEnd === false` 或 `dataLimit === true` 時保留已回傳的資料並記錄 `rakuten_tx_truncated`；沒有交易的月份不算截斷。
 - 明細只是附加資料：找不到選單、月份下拉、回應逾時、時間不足或整月解析失敗，都只記錄事件（`rakuten_tx_fetch_skipped`、`rakuten_tx_fetch_failed`、`rakuten_tx_skipped`，內容只有原因代碼與月數、筆數），不讓同步失敗，餘額快照照常寫入。
 - 同步逾時上限為 55 秒（登入與首頁存款）；活存明細與其後的解析階段使用延長後的 75 秒期限，並固定保留 8 秒給登出與收尾，剩餘時間不足 5 秒就不再抓下一個月份。每次同步結束一律點頁首「登出」並確認，再關閉瀏覽器，登出失敗只記錄事件，不影響同步結果。同步摘要 log 另含 `depositTxnMonthsFetched`、`depositTxnCount` 與各階段耗時 `loginMs`、`dashboardMs`、`depositTxnMs`、`logoutMs`。
 - 安全規則：

@@ -37,10 +37,14 @@ apps/
     │   │   ├── notifications/
     │   │   ├── ocr/
     │   │   └── sync/
-    │   │       └── sources/
-    │   ├── connectors/
+    │   │       ├── manual-sync.ts
+    │   │       ├── scheduling/
+    │   │       └── reports/
+    │   ├── sources/
     │   │   ├── types.ts
-    │   │   └── protocols/
+    │   │   ├── config-registry.ts
+    │   │   ├── browser.ts
+    │   │   └── <connectorId>/
     │   ├── db/
     │   │   └── schema/
     │   ├── middleware/
@@ -49,7 +53,7 @@ apps/
     ├── schema-metadata.json
     ├── seeds/
     └── tests/
-        ├── connectors/
+        ├── sources/
         ├── db/
         ├── features/
         ├── helpers/
@@ -78,10 +82,12 @@ flowchart TD
     FeatureRoute["feature/route.ts"]
     FeatureService["feature/service.ts"]
     FeatureRepository["feature/repository.ts"]
-    WorkerConnector["apps/worker/src/connectors"]
+    SourceSync["sources/<connectorId>/sync.ts"]
+    WorkerConnector["sources/<connectorId>/connector.ts"]
+    SyncPersistence["features/sync/persistence.ts"]
     Platform["platform"]
     Shared["@taiwan-fin-hub/shared"]
-    Connectors["apps/worker/src/connectors/protocols"]
+    Connectors["sources/<connectorId>/protocol.ts / client"]
     DB["apps/worker/src/db"]
     D1["Cloudflare D1"]
     Browser["Browser Rendering / Workers AI"]
@@ -93,13 +99,17 @@ flowchart TD
     FeatureRoute --> Platform
     FeatureRoute --> FeatureService
     FeatureService --> FeatureRepository
-    FeatureService --> WorkerConnector
-    FeatureService --> Connectors
+    FeatureService --> SourceSync
     FeatureService --> DB
 
     FeatureRepository --> DB
     FeatureRepository --> D1
     DB --> D1
+    SourceSync --> WorkerConnector
+    SourceSync --> Connectors
+    SourceSync --> SyncPersistence
+    SourceSync --> FeatureRepository
+    SyncPersistence --> D1
     WorkerConnector --> Browser
     WorkerConnector --> Connectors
 
@@ -219,32 +229,19 @@ Cloudflare Worker 與 HTTP 平台層，目前包含：
 
 Middleware 應只處理跨功能的 request concern，不應承擔 feature 商業邏輯。
 
-### `apps/worker/src/connectors/`
+### `apps/worker/src/sources/`
 
-連接器實作集中在此目錄；根目錄放需要 Cloudflare Worker bindings 的 adapter，例如：
+各銀行、集保與電子發票以資料來源為目錄歸屬。維護一家銀行時，在 `sources/<connectorId>/` 查找它的同步、登入、API client、解析與資料修復；依實際需要保留檔案，不要求每個來源有同一套檔案。
 
-- Browser Rendering。
-- Puppeteer browser lifecycle。
-- Workers AI。
-- Worker-specific session management。
+- `sync.ts`：讀取及解密設定、處理 challenge、呼叫 connector，組合共用 persistence 與來源 repository。
+- `connector.ts`：需要 Browser Rendering、Puppeteer 或 Worker binding 的外部取資料 adapter；可以使用 `BROWSER` 或 `AI`，不直接讀寫 D1。
+- `protocol.ts` 與 API client：設定 schema、外部協定、signing／encryption、parser、response normalization，以及不需要 Worker binding 的 connector。
+- `repository.ts`、`authorizations.ts` 等：來源專用的資料修復、交易配對與存款生命週期。
+- `run-repository.ts`：電子發票與集保的 durable run／item、進度、session 與處理 lease。
 
-這些 connector 可以使用 `BROWSER` 或 `AI` binding，並將外部資料轉成 `@taiwan-fin-hub/shared` 定義的標準資料格式。
+實體目錄集中不改變相依邊界：`sync.ts` 可依賴 connector、protocol、client、repository 與明確的共用 service；protocol／client 不得依賴 Hono、D1、Worker `Env`、adapter 或同步流程，也不得直接寫入資料庫。來源之間不引用彼此的內部實作。
 
-`types.ts` 定義僅在後端使用的 `Connector` 與 `SyncResult`；protocol 與 Worker adapter 共用這些純型別，不將同步實作介面放入前後端共用套件。
-
-### `apps/worker/src/connectors/protocols/`
-
-不直接依賴 Hono、D1 或 Worker `Env` 的外部資料來源程式，包括：
-
-- Connector config schema。
-- 外部 API client。
-- Protocol signing、encryption 與 parsing。
-- Response normalization。
-- 不需要 Worker binding 的 connector。
-
-若 connector 必須使用 Browser Rendering，config、parser 與型別放在 `protocols/`，Worker-specific browser adapter 放在 `apps/worker/src/connectors/` 根目錄。兩者都是 Worker 內部模組，protocols 不得直接寫入資料庫或反向依賴 adapter。
-
-`protocols/index.ts` 僅提供匯出；電子發票實作與 config registry 分別位於 `einvoice.ts` 與 `config-registry.ts`。Worker 內部依功能直接引用來源模組，入口不包含同步實作或 registry 初始化。
+`sources` 根目錄只保留跨來源使用的能力：`browser.ts` 管 browser acquisition 與 capacity 錯誤，`types.ts` 定義後端 `Connector`／`SyncResult`，`sync-window.ts` 與 `credit-card-status.ts` 提供共同 policy／判斷。`config-registry.ts` 直接引用各來源的純 schema，供設定 feature 使用；同步 handler 仍由 `features/sync/registry.ts` 組裝。Worker 與測試直接引用來源檔案，不建立跨來源的實作匯出入口。
 
 ### `shared/`
 
@@ -271,7 +268,7 @@ Middleware 應只處理跨功能的 request concern，不應承擔 feature 商�
 - 加密設定與 sync cursor 狀態。
 - Sync job、schedule 與 lock。
 
-Drizzle 型別只留在 DB 與 Worker repository 層。`shared`、前端與 `apps/worker/src/connectors/protocols` 不依賴 ORM。日期維持既有 TEXT string，金額與 JSON／flag 語意不因導入而改寫。
+Drizzle 型別只留在 DB 與 Worker repository 層。`shared`、前端及來源的 protocol／client／connector 不依賴 ORM。日期維持既有 TEXT string，金額與 JSON／flag 語意不因導入而改寫。
 
 Feature-specific 查詢應放在 feature 的 `repository.ts`，而不是持續擴大 `apps/worker/src/db/index.ts`。一般 repository 以 Drizzle 為預設寫法；sync job、run／item、排程、通知批次及報告的一般讀取，以及同步 lease 與獨立 run 狀態更新已使用 Drizzle。selection 維持既有 row shape、排序與 LEFT JOIN null；staging promotion 與 durable item 寫入的 statement composition 保留整組原生 D1 batch。
 
@@ -483,33 +480,102 @@ X-Next-Cursor: <opaque-cursor>
 
 ## Connector 同步架構
 
-同步 feature 位於：
+共用同步管理位於 `features/sync`，各來源實作位於 Worker 根層的 `sources`：
 
 ```text
 apps/worker/src/features/sync/
+apps/worker/src/sources/
 ```
 
-主要責任如下：
+目錄依同步管理與資料來源分組：
 
-- `route.ts`：手動同步 API 與 connector-specific 錯誤 mapping。
-- `service.ts`：手動同步的 lock、狀態更新與排程報告修復協調。
-- `sources/<connectorId>.ts`：各銀行及集保的單次同步 use case、互動式 challenge、設定解密、connector 呼叫與來源專用 reconciliation；override 型別與該來源 colocate。
-- `registry.ts`：從共用 catalog 驗證 scope，組裝各來源的同步與 challenge handler。
-- `types.ts`：同步 scope、scope 常數與 outcome 型別。
-- `config.ts`：取得已儲存設定、加密敏感設定與序列化公開偏好。
-- `lock.ts`：共用 lease、heartbeat 與 connector lock ID。
-- `errors.ts`：共用同步錯誤、使用者操作判定與錯誤訊息／log 脫敏。
-- `record-mapper.ts`：將 connector result 轉換成 database write record。
-- `persistence.ts`：透過 staging table 與 D1 batch 將同步資料寫入正式資料表。
-- `repository.ts`：同步流程使用的 query 與 prepared statement。
-- `schedule-route.ts`：排程設定 API。
-- `schedule-service.ts`：排程設定 use case。
-- `scheduler.ts`：到期工作選取、預設排程批次與同步 dispatch。
-- `scheduler-queue.ts`：Cron 啟動訊息、Queue consumer 與分段同步 continuation。
-- `einvoice-sync-service.ts` / `einvoice-run-repository.ts`：電子發票 durable run 與明細工作。
-- `tdcc-sync-service.ts` / `tdcc-run-repository.ts`：集保 durable run、分頁工作與結果彙整。
+```text
+sync/
+├── route.ts                   # 手動同步與 challenge API
+├── manual-sync.ts             # 手動同步的鎖、結果狀態與報告修復
+├── registry.ts                # 來源 dispatch 與 scope 驗證
+├── types.ts
+├── config.ts
+├── connector-state.ts
+├── connector-repository.ts
+├── lock.ts
+├── errors.ts
+├── record-mapper.ts
+├── persistence.ts
+├── transaction-merge.ts
+├── card-reconciliation.ts
+├── scheduling/
+│   ├── route.ts               # 排程設定與工作狀態 API
+│   ├── service.ts             # 排程設定 use case
+│   ├── repository.ts          # 排程設定與 sync jobs 存取
+│   ├── scheduler.ts           # 到期工作選取與執行
+│   ├── queue.ts               # Queue producer／consumer 與重試
+│   └── batch-repository.ts    # 預設排程一輪的固定成員與結案
+└── reports/
+    ├── route.ts               # 最近報告與活動明細 API
+    ├── repository.ts          # 金融快照、報告查詢與修復
+    ├── activity-capture.ts    # 寫入前後的活動變化 journal
+    ├── activity-detail-service.ts
+    └── activity-detail-repository.ts
 
-各來源直接引用 connector protocol／adapter 與既有 record mapper、persistence，不經由 `service.ts` 匯出，也不互相依賴其他來源。拆分維持既有驗證、session、cursor 與 D1 promotion／finalize 的原子邊界；電子發票與集保的 durable Queue 流程仍由各自的 sync service 管理。
+sources/
+├── browser.ts
+├── types.ts
+├── config-registry.ts
+├── sync-window.ts
+├── credit-card-status.ts
+├── esun/
+│   ├── sync.ts                # 玉山同步 use case
+│   ├── connector.ts           # 銀行登入、session 與資料擷取
+│   ├── protocol.ts            # 純設定 schema
+│   ├── portal.ts              # 銀行頁面擷取與解析
+│   ├── authorizations.ts      # 待入帳／已入帳銜接
+│   └── repository.ts          # 玉山專用舊資料修復
+├── sinopac/
+│   ├── sync.ts
+│   ├── connector.ts
+│   ├── protocol.ts
+│   ├── deposit-protocol.ts
+│   ├── authorizations.ts
+│   ├── matching.ts
+│   └── repository.ts
+├── einvoice/
+│   ├── sync.ts                # 電子發票 Queue 分段同步
+│   ├── protocol.ts
+│   ├── api.ts
+│   ├── v2-client.ts
+│   ├── invoice-data.ts
+│   └── run-repository.ts      # durable run／item 與處理 lease
+├── tdcc/
+│   ├── sync.ts                # 集保 Queue 分段同步
+│   ├── protocol.ts
+│   ├── epassbook-client.ts
+│   └── run-repository.ts
+└── <其他銀行>/
+    ├── sync.ts
+    ├── protocol.ts
+    └── 來源專用 connector／client／輔助檔案
+```
+
+根目錄共用檔案的責任如下：
+
+| 檔案                                             | 責任                                                                                                                                       |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `route.ts`                                       | 手動同步 API、request validation 與 connector-specific 錯誤 mapping。                                                                      |
+| `manual-sync.ts`                                 | 一般銀行手動同步的 lock、狀態更新與已結案排程報告修復協調。                                                                                |
+| `registry.ts`                                    | 從共用 catalog 驗證 scope，dispatch 單次同步與 challenge handler；電子發票與集保的 `run` 明確拒絕單次同步，入口必須使用各自的 Queue 流程。 |
+| `types.ts`                                       | 同步 scope、scope 常數與 outcome 型別。                                                                                                    |
+| `config.ts`、`connector-state.ts`                | 取得設定、加密敏感欄位，區分公開偏好、敏感 session 與安全 cursor。                                                                         |
+| `connector-repository.ts`                        | 共用設定／cursor 寫入、設定版本 guard 與跨來源帳戶關聯；銀行專用修復放在來源目錄。                                                         |
+| `lock.ts`、`errors.ts`                           | 共用 lease／heartbeat、使用者操作判定與錯誤訊息／log 脫敏。                                                                                |
+| `record-mapper.ts`、`persistence.ts`             | 將 connector result 轉成 write record，透過 staging table 與 D1 batch 寫入正式資料表。                                                     |
+| `transaction-merge.ts`、`card-reconciliation.ts` | 共用舊交易合併與單卡摘要帳戶修復；保留使用者偏好、分類與發票關聯。                                                                         |
+
+Worker 的 `sources/<connectorId>/sync.ts` 負責設定解密、connector 呼叫與同步資料寫入；單次銀行流程也處理互動式 challenge，override 型別與來源 colocate。`ctbc/authorizations.ts` 管信用卡授權合併，`hncb/repository.ts` 管華南舊交易／帳戶修復，`nextbank/deposits.ts` 與 `obank/time-deposits.ts` 管存款生命週期。共用同步管理留在 `features/sync`，來源之間共用的外部取資料工具留在 `sources` 根目錄。
+
+各來源直接引用同一來源目錄的 protocol／adapter，以及 `features/sync` 的共用 record mapper、persistence，不經由 `manual-sync.ts` 匯出，也不互相依賴其他來源。電子發票與集保的 `sync.ts`／`run-repository.ts` 管理 durable Queue 流程，集保不再保留另一套單次同步實作。目錄調整不改變驗證、session、cursor 與 D1 promotion／finalize 的原子邊界。
+
+閱讀一般銀行手動流程時，依序看 `features/sync/route.ts` → `manual-sync.ts` → `registry.ts` → `sources/<connectorId>/sync.ts`，再查看同一來源的 connector／protocol 與共用 `features/sync/persistence.ts`。排程流程從 `features/sync/scheduling/queue.ts` → `scheduler.ts` 開始；電子發票與集保則直接看來源的 `sync.ts` 和 `run-repository.ts`。來源專用測試與 fixtures 位於 `apps/worker/tests/sources/<connectorId>`；跨來源的同步資料完整性測試留在 `tests/features/sync`。
 
 同步資料流：
 
@@ -677,7 +743,7 @@ Connector 不得直接寫入金融資料表。
   不以 `updated_at` 判斷內容變化；沒有變化的授權候選在同一 transaction 移除。
 - 電子發票 durable promotion 使用相同 settings-version guard 保存新發票快照；
   集保使用既有 promotion 與鎖的 run ID。結果發佈與來源結果更新共用 CAS transaction。
-- `activity-detail-service.ts` 在報告結案及手動補救後，以完整同日候選與既有活動配對
+- `reports/activity-detail-service.ts` 在報告結案及手動補救後，以完整同日候選與既有活動配對
   規則建立展示快照。交易與發票在來源明細中合併，同批新增資料與活動筆數可不同；
   已配對授權與已入帳交易只呈現一次。跨來源列仍各自說明各來源的變動。
 - 快照不含 raw payload／憑證。名稱、金額與配對展示在明細完成後不受後續同步影響。
@@ -709,9 +775,9 @@ Connector 不得直接寫入金融資料表。
 新增 connector 必須遵循 [`docs/004-connector-development.md`](004-connector-development.md)。核心步驟包括：
 
 1. 在 `connectorCatalog` 宣告 ID、連接模式、scope、資料能力與設定欄位分類。
-2. 在 `connectorConfigSchemas` 註冊 config schema、parser 與通用 protocol/client。
-3. 需要 Worker binding 時，在 `apps/worker/src/connectors` 建立 adapter。
-4. 在 sync service 將資料正規化並透過 staged persistence 寫入。
+2. 在 `apps/worker/src/sources/<connectorId>` 建立 `protocol.ts`、必要的 client 與 parser，並在 `sources/config-registry.ts` 的 `connectorConfigSchemas` 註冊 config schema。
+3. 需要 Worker binding 時，在同一來源目錄建立 `connector.ts` adapter。
+4. 在同一來源目錄的 `sync.ts` 組合共用 record mapping 與 staged persistence 寫入；來源專用的配對與修復放在相鄰檔案。
 5. 在 `connectorRuntimeRegistry` 註冊手動／排程同步與 challenge handler。
 6. 前端使用受 `ConnectorFormFieldKey` 約束的欄位，不得重複維護 connector 顯示 metadata。
 7. 透過 migration 建立預設停用的 `all` sync job。
@@ -754,7 +820,7 @@ npm run test:unit
 - Composition Root 保持精簡。
 - Route 保持薄，Service 表達 use case，Repository 集中 SQL。
 - 避免為小型專案引入不必要的 DDD 或 Clean Architecture ceremony。
-- 只有真正跨 feature 的程式才移入 package 或 platform。
+- 前後端共用契約與純邏輯放在根目錄的 `shared/`；後端跨 feature 的資料存取基礎能力、Worker／HTTP 平台工具與 middleware，分別放在 `apps/worker/src/db`、`apps/worker/src/platform` 與 `apps/worker/src/middleware`。不因跨 feature 使用就新增獨立套件。
 - 外部系統資料先正規化，再進入主要資料模型。
 - 所有敏感設定必須加密後儲存。
 - 所有未知錯誤必須在 API 邊界被消毒。

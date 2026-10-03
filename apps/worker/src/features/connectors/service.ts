@@ -1,4 +1,4 @@
-import { parseConnectorConfig } from "../../connectors/protocols/config-registry";
+import { parseConnectorConfig } from "../../sources/config-registry";
 import { connectorCatalog, type ConnectorId } from "@taiwan-fin-hub/shared";
 import { clearConnectorCursor } from "../../db";
 import { configEncryptionKey } from "../../platform/config";

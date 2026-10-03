@@ -10,17 +10,17 @@ const mocks = vi.hoisted(() => ({
   runSchedulerTick: vi.fn(),
 }));
 
-vi.mock("../../../src/features/sync/scheduler", () => ({
+vi.mock("../../../src/features/sync/scheduling/scheduler", () => ({
   runSchedulerTick: mocks.runSchedulerTick,
 }));
 
-vi.mock("../../../src/features/sync/einvoice-sync-service", () => ({
+vi.mock("../../../src/sources/einvoice/sync", () => ({
   failEinvoiceSyncRun: mocks.failEinvoiceSyncRun,
   isEinvoiceUserActionError: mocks.isEinvoiceUserActionError,
   processEinvoiceSyncChunk: mocks.processEinvoiceSyncChunk,
 }));
 
-vi.mock("../../../src/features/sync/tdcc-sync-service", () => ({
+vi.mock("../../../src/sources/tdcc/sync", () => ({
   failTdccSyncRun: mocks.failTdccSyncRun,
   processTdccSyncChunk: mocks.processTdccSyncChunk,
 }));
@@ -28,7 +28,7 @@ import {
   consumeScheduledSyncQueue,
   DEMO_MODE_PARKED_CHUNK_DELAY_SECONDS,
   enqueueScheduledSync,
-} from "../../../src/features/sync/scheduler-queue";
+} from "../../../src/features/sync/scheduling/queue";
 
 function queueMessage(body: ScheduledSyncQueueMessage) {
   return {

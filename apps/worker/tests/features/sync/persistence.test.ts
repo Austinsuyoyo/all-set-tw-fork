@@ -9,7 +9,7 @@ import {
 import {
   connectorStateStatement,
   updateConnectorEncryptedConfigIfCurrent,
-} from "../../../src/features/sync/repository";
+} from "../../../src/features/sync/connector-repository";
 
 const now = "2026-09-01T10:30:00+08:00";
 const account: SyncWriteRecord = {

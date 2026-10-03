@@ -12,7 +12,7 @@ import {
   createOrGetActiveEinvoiceRun,
   completeEinvoiceRun,
   claimEinvoiceRunSessionRefresh,
-} from "../../../src/features/sync/einvoice-run-repository";
+} from "../../../src/sources/einvoice/run-repository";
 import {
   acquireTdccRunLease,
   renewTdccRunLease,
@@ -21,12 +21,12 @@ import {
   updateTdccRunState,
   finalizeTdccRun,
   claimTdccRunSessionRefresh,
-} from "../../../src/features/sync/tdcc-run-repository";
+} from "../../../src/sources/tdcc/run-repository";
 import {
   stageSyncWriteRecords,
   promoteStagedSyncWrite,
 } from "../../../src/features/sync/persistence";
-import { connectorCursorStatement } from "../../../src/features/sync/repository";
+import { connectorCursorStatement } from "../../../src/features/sync/connector-repository";
 
 const now = "2026-09-13T00:00:00.000Z";
 
