@@ -150,6 +150,7 @@ type NetworkRequestWillBeSentEvent = {
 
 type FetchRequestPausedEvent = {
   requestId: string;
+  networkId?: string;
   resourceType?: string;
   request: { url: string };
   responseStatusCode?: number;
@@ -157,6 +158,7 @@ type FetchRequestPausedEvent = {
 
 type BrowserResponse = {
   url(): string;
+  request?(): object;
   status(): number;
   json(): Promise<unknown>;
   text(): Promise<string>;
@@ -936,6 +938,25 @@ async function collectFirstbankPayloads(
   const responseTasks: Promise<void>[] = [];
   const depositResponse = createDepositResponseCapture();
   let transactionResponse = createTransactionResponseCapture();
+  // Each account query gets a new capture. Bind every bank request to the
+  // capture that was current when it was sent, so a late CDP or HTTP event
+  // from the previous account can never settle the next account's capture.
+  const transactionRequestCaptures = new Map<
+    string,
+    TransactionResponseCapture
+  >();
+  const captureForRequest = (requestId: string | undefined) =>
+    (requestId && transactionRequestCaptures.get(requestId)) ||
+    transactionResponse;
+  // Puppeteer exposes no public request id on HTTPResponse, so page-level
+  // responses are bound through their request object instead.
+  const transactionPageRequestCaptures = new WeakMap<
+    object,
+    TransactionResponseCapture
+  >();
+  const onPageRequest = (request: object) => {
+    transactionPageRequestCaptures.set(request, transactionResponse);
+  };
   const cdp = await page.createCDPSession();
   try {
     await cdp.send("Network.enable", {
@@ -972,6 +993,7 @@ async function collectFirstbankPayloads(
         resourceType: event.type,
       });
     }
+    transactionRequestCaptures.set(event.requestId, transactionResponse);
     const path = urlPathname(url);
     if (isCapturableResourceType(event.type)) {
       transactionResponse.inFlight.set(event.requestId, {
@@ -994,7 +1016,8 @@ async function collectFirstbankPayloads(
   ) => {
     const url = event.response.url;
     if (!isFirstbankUrl(url)) return;
-    transactionResponse.inFlight.delete(event.requestId);
+    const capture = captureForRequest(event.requestId);
+    capture.inFlight.delete(event.requestId);
     const path = urlPathname(url);
     const status = event.response.status;
     const resourceType = event.type;
@@ -1006,24 +1029,24 @@ async function collectFirstbankPayloads(
       });
     }
     if (
-      transactionResponse.armed &&
+      capture.armed &&
       isTransactionVerificationResponse(url) &&
-      transactionResponse.verificationRequestIds.delete(event.requestId)
+      capture.verificationRequestIds.delete(event.requestId)
     ) {
-      transactionResponse.verificationResponded = true;
-      transactionResponse.verificationSettledAt = Date.now();
+      capture.verificationResponded = true;
+      capture.verificationSettledAt = Date.now();
       if (typeof status === "number" && (status < 200 || status >= 400)) {
-        transactionResponse.verificationFailed = true;
+        capture.verificationFailed = true;
       }
       logFirstbankStage("0101-verification-response", {
         path,
         status,
         resourceType,
-        elapsedMs: elapsedSinceArmed(transactionResponse),
+        elapsedMs: elapsedSinceArmed(capture),
       });
     }
     if (
-      transactionResponse.armed &&
+      capture.armed &&
       isTransactionResultResponse(url) &&
       isCapturableResourceType(resourceType)
     ) {
@@ -1031,49 +1054,52 @@ async function collectFirstbankPayloads(
         path,
         status,
         resourceType,
-        elapsedMs: elapsedSinceArmed(transactionResponse),
+        elapsedMs: elapsedSinceArmed(capture),
       });
-      transactionResponse.requestIds.add(event.requestId);
-      transactionResponse.documentMeta.set(event.requestId, { path, status });
+      capture.requestIds.add(event.requestId);
+      capture.documentMeta.set(event.requestId, { path, status });
     }
   };
   const onTransactionDocumentLoaded = (event: TransactionLoadingEvent) => {
-    transactionResponse.inFlight.delete(event.requestId);
-    if (!transactionResponse.requestIds.has(event.requestId)) return;
-    const meta = transactionResponse.documentMeta.get(event.requestId);
+    const capture = captureForRequest(event.requestId);
+    capture.inFlight.delete(event.requestId);
+    if (!capture.requestIds.has(event.requestId)) return;
+    const meta = capture.documentMeta.get(event.requestId);
     let task: Promise<void>;
     task = captureTransactionDocument(
       cdp,
       event.requestId,
-      transactionResponse,
+      capture,
       meta,
     ).finally(() => {
-      transactionResponse.requestIds.delete(event.requestId);
-      transactionResponse.documentMeta.delete(event.requestId);
-      transactionResponse.pending.delete(task);
+      capture.requestIds.delete(event.requestId);
+      capture.documentMeta.delete(event.requestId);
+      capture.pending.delete(task);
     });
-    transactionResponse.pending.add(task);
+    capture.pending.add(task);
     void task.catch(() => undefined);
   };
   const onTransactionDocumentFailed = (event: TransactionLoadingEvent) => {
-    transactionResponse.inFlight.delete(event.requestId);
-    if (transactionResponse.verificationRequestIds.delete(event.requestId)) {
-      transactionResponse.verificationFailed = true;
-      transactionResponse.verificationSettledAt = Date.now();
+    const capture = captureForRequest(event.requestId);
+    capture.inFlight.delete(event.requestId);
+    if (capture.verificationRequestIds.delete(event.requestId)) {
+      capture.verificationFailed = true;
+      capture.verificationSettledAt = Date.now();
       logFirstbankStage("0101-verification-failed", {
         path: "/NetBank/2/verifyDV.html",
-        elapsedMs: elapsedSinceArmed(transactionResponse),
+        elapsedMs: elapsedSinceArmed(capture),
       });
     }
-    transactionResponse.requestIds.delete(event.requestId);
-    transactionResponse.documentMeta.delete(event.requestId);
+    capture.requestIds.delete(event.requestId);
+    capture.documentMeta.delete(event.requestId);
   };
   const onFetchPaused = (event: FetchRequestPausedEvent) => {
+    const capture = captureForRequest(event.networkId);
     let task: Promise<void>;
-    task = captureFetchPausedDocument(cdp, event, transactionResponse).finally(
-      () => transactionResponse.pending.delete(task),
+    task = captureFetchPausedDocument(cdp, event, capture).finally(() =>
+      capture.pending.delete(task),
     );
-    transactionResponse.pending.add(task);
+    capture.pending.add(task);
     void task.catch(() => undefined);
   };
   cdp.on("Network.requestWillBeSent", onTransactionRequest);
@@ -1092,20 +1118,21 @@ async function collectFirstbankPayloads(
       void task.catch(() => undefined);
       return;
     }
-    if (
-      transactionResponse.armed &&
-      isTransactionResultResponse(response.url())
-    ) {
+    const request = response.request?.();
+    const capture =
+      (request && transactionPageRequestCaptures.get(request)) ||
+      transactionResponse;
+    if (capture.armed && isTransactionResultResponse(response.url())) {
       logFirstbankStage("010103-http-response", {
         path: urlPathname(response.url()),
         status: httpStatus(response),
-        elapsedMs: elapsedSinceArmed(transactionResponse),
+        elapsedMs: elapsedSinceArmed(capture),
       });
       let task: Promise<void>;
-      task = captureTransactionResponse(response, transactionResponse).finally(
-        () => transactionResponse.pending.delete(task),
+      task = captureTransactionResponse(response, capture).finally(() =>
+        capture.pending.delete(task),
       );
-      transactionResponse.pending.add(task);
+      capture.pending.add(task);
       void task.catch(() => undefined);
       return;
     }
@@ -1136,6 +1163,7 @@ async function collectFirstbankPayloads(
     responseTasks.push(task);
     void task.catch(() => undefined);
   };
+  page.on("request", onPageRequest);
   page.on("response", onResponse);
   // A native confirm/alert raised by the bank's own handlers freezes the
   // renderer until it is answered, which stalls every in-flight request and
@@ -1200,8 +1228,9 @@ async function collectFirstbankPayloads(
     let accountCount = 1;
     for (let accountIndex = 0; accountIndex < accountCount; accountIndex += 1) {
       if (accountIndex > 0) {
-        // Listeners read transactionResponse when an event arrives, so a
-        // late body from the previous account settles the old capture only.
+        // Requests already sent stay bound to the previous capture (see
+        // transactionRequestCaptures), so their late events cannot settle
+        // the next account's capture.
         await withActionTimeout(
           Promise.allSettled(Array.from(transactionResponse.pending)),
           RESULT_CAPTURE_WAIT_MS,
@@ -1254,6 +1283,7 @@ async function collectFirstbankPayloads(
         RESULT_CAPTURE_WAIT_MS,
       ).catch(() => undefined);
     }
+    page.off("request", onPageRequest);
     page.off("response", onResponse);
     page.off("dialog", onDialog);
     page.off("pageerror", onPageError);
