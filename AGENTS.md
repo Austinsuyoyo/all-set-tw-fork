@@ -26,14 +26,16 @@
 - `apps/web/src/shared`：跨 feature 共用的 UI、API client、格式化、state 與 actions。
 - `apps/worker`：Hono API、同步流程、Cloudflare bindings 與靜態網站服務。
 - `apps/worker/src/features`：依業務功能組織的後端 vertical slices。
-- `apps/worker/src/features/sync/sources`：各來源的單次同步與 challenge use case；共用 lock、設定與錯誤處理留在 sync feature。
-- `apps/worker/src/connectors`：連接器實作；根目錄放依賴 Browser Rendering、Workers AI 等 Worker bindings 的 adapter。
-- `apps/worker/src/connectors/protocols`：不依賴 Hono、D1 或 Worker `Env` 的外部資料來源邏輯。
+- `apps/worker/src/features/sync`：手動同步入口與共用 lock、設定、資料寫入；手動協調位於 `manual-sync.ts`。
+- `apps/worker/src/features/sync/scheduling`：排程設定、到期工作選取、Queue dispatch 與預設排程批次。
+- `apps/worker/src/features/sync/reports`：同步報告 API、金融快照與活動變化明細。
+- `apps/worker/src/sources/<connectorId>`：依資料來源集中 `sync.ts`、connector、protocol、client 與專用配對／修復；電子發票與集保在此管理 Queue 分段同步與 `run-repository.ts`。
+- `apps/worker/src/sources` 根目錄：跨來源共用的 browser 工具、設定 registry、純型別與同步回溯 policy。來源的 protocol／client 不依賴 Hono、D1、Worker `Env` 或同步流程。
 - `apps/worker/src/db`：跨後端 feature 共用的 D1 基礎能力與 Drizzle schema／client。
 - `apps/worker/migrations`、`apps/worker/schema-metadata.json`、`apps/worker/seeds`：資料庫遷移、schema 文件語意與 Demo 種子資料。
 - 根目錄 `shared/`：前後端與連接器共用的穩定型別、契約與純活動處理邏輯，以 `@taiwan-fin-hub/shared` 引用。
 - `shared/bank-api.ts`：銀行與信用卡帳單 API response 契約；前端引用，Worker 在 JSON 回傳處檢查。
-- `apps/worker/src/connectors/types.ts`：僅後端使用的 `Connector` 與 `SyncResult` 型別。
+- `apps/worker/src/sources/types.ts`：僅後端使用的 `Connector` 與 `SyncResult` 型別。
 - `docs/002-backend-architecture.md`：後端分層、相依方向與維護約定的詳細文件。
 - `docs/003-frontend-architecture.md`：前端分層、相依方向與測試 colocate 約定。
 - `docs/004-connector-development.md`：Connector catalog、連接模式、敏感狀態與新增流程規範。

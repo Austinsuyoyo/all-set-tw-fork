@@ -1,58 +1,58 @@
-import { CtbcConnectionError } from "../../connectors/protocols/ctbc-mobile-api";
-import { EInvoiceProtocolUnavailableError } from "../../connectors/protocols/tw-einvoice-api";
+import { CtbcConnectionError } from "../../sources/ctbc/mobile-api";
+import { EInvoiceProtocolUnavailableError } from "../../sources/einvoice/api";
 import {
   ObankConnectionError,
   ObankProtocolError,
-} from "../../connectors/protocols/obank-mobile-api";
-import { SkbankConnectionError } from "../../connectors/protocols/skbank-mobile-api";
-import { SkbankProtocolError } from "../../connectors/protocols/skbank";
+} from "../../sources/obank/mobile-api";
+import { SkbankConnectionError } from "../../sources/skbank/mobile-api";
+import { SkbankProtocolError } from "../../sources/skbank/protocol";
 import {
   TdccConnectionError,
   TdccVerificationRequiredError,
-} from "../../connectors/protocols/tdcc";
+} from "../../sources/tdcc/protocol";
 import {
   MegabankConnectionError,
   MegabankOtpInvalidError,
   MegabankOtpRequiredError,
   MegabankProtocolError,
   MegabankVerificationRequiredError,
-} from "../../connectors/protocols/megabank-mobile-api";
+} from "../../sources/megabank/mobile-api";
 import { zValidator } from "@hono/zod-validator";
 import { type Context, type Hono } from "hono";
 import { z } from "zod";
-import { BrowserRunCapacityError } from "../../connectors/browser";
+import { BrowserRunCapacityError } from "../../sources/browser";
 import {
   FirstbankBrowserCapacityError,
   FirstbankConnectionError,
   FirstbankVerificationRequiredError,
-} from "../../connectors/firstbank";
+} from "../../sources/firstbank/connector";
 import {
   HncbBrowserCapacityError,
   HncbConnectionError,
   HncbVerificationRequiredError,
-} from "../../connectors/hncb";
+} from "../../sources/hncb/connector";
 import {
   KgibankBrowserCapacityError,
   KgibankConnectionError,
   KgibankVerificationRequiredError,
-} from "../../connectors/kgibank";
+} from "../../sources/kgibank/connector";
 import {
   RakutenBrowserCapacityError,
   RakutenConnectionError,
   RakutenVerificationRequiredError,
-} from "../../connectors/rakuten";
+} from "../../sources/rakuten/connector";
 import {
   CathayOtpChannelRequiredError,
   CathayOtpInvalidError,
   CathayOtpRequiredError,
   CathayOtpSessionExpiredError,
   CathayVerificationRequiredError,
-} from "../../connectors/cathaybk";
-import { SinopacBrowserCapacityError } from "../../connectors/sinopac";
+} from "../../sources/cathaybk/connector";
+import { SinopacBrowserCapacityError } from "../../sources/sinopac/connector";
 import {
   TaishinBrowserCapacityError,
   TaishinConnectionError,
-} from "../../connectors/taishin";
+} from "../../sources/taishin/connector";
 import type { AppBindings } from "../../platform/env";
 import { honoFactory } from "../../platform/hono";
 import { jsonError } from "../../platform/http";
@@ -71,11 +71,14 @@ import {
   TDCC_SCOPE_TRADES,
   type SyncOutcome,
 } from "./types";
-import { withManualSyncLock } from "./service";
+import { withManualSyncLock } from "./manual-sync";
 import { prepareConnectorChallenge, runConnectorSync } from "./registry";
-import { cancelQueuedTdccSyncRun, startTdccSyncRun } from "./tdcc-sync-service";
-import { enqueueTdccSyncChunk } from "./scheduler-queue";
-import type { TdccRunScope } from "./tdcc-run-repository";
+import {
+  cancelQueuedTdccSyncRun,
+  startTdccSyncRun,
+} from "../../sources/tdcc/sync";
+import { enqueueTdccSyncChunk } from "./scheduling/queue";
+import type { TdccRunScope } from "../../sources/tdcc/run-repository";
 
 const tdccSyncBodySchema = z.object({
   otp: z.string().min(1).optional(),
@@ -154,8 +157,8 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
   api.post("/connectors/einvoice/sync", async (c) => {
     try {
       const { cancelQueuedEinvoiceSyncRun, startEinvoiceSyncRun } =
-        await import("./einvoice-sync-service");
-      const { enqueueEinvoiceSyncChunk } = await import("./scheduler-queue");
+        await import("../../sources/einvoice/sync");
+      const { enqueueEinvoiceSyncChunk } = await import("./scheduling/queue");
       const { run, created } = await startEinvoiceSyncRun(c.env, {
         trigger: "manual",
       });

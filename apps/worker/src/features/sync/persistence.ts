@@ -1,7 +1,7 @@
 import {
   captureStagedActivityBefore,
   captureStagedActivityAfter,
-} from "./activity-capture";
+} from "./reports/activity-capture";
 import {
   createDrizzle,
   sanitizeDatabaseError,

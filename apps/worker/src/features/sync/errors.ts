@@ -1,22 +1,22 @@
 import type { ConnectorId } from "@taiwan-fin-hub/shared";
-import { BrowserRunCapacityError } from "../../connectors/browser";
+import { BrowserRunCapacityError } from "../../sources/browser";
 import {
   CathayOtpChannelRequiredError,
   CathayOtpRequiredError,
   CathayOtpSessionExpiredError,
   CathayVerificationRequiredError,
-} from "../../connectors/cathaybk";
+} from "../../sources/cathaybk/connector";
 import {
   TdccOtpExpiredError,
   TdccVerificationRequiredError,
-} from "../../connectors/protocols/tdcc";
-import { EInvoiceProtocolUnavailableError } from "../../connectors/protocols/tw-einvoice-api";
-import { SinopacVerificationRequiredError } from "../../connectors/sinopac";
-import { TaishinVerificationRequiredError } from "../../connectors/taishin";
-import { HncbVerificationRequiredError } from "../../connectors/hncb";
-import { RakutenVerificationRequiredError } from "../../connectors/rakuten";
-import { KgibankVerificationRequiredError } from "../../connectors/kgibank";
-import { MegabankVerificationRequiredError } from "../../connectors/protocols/megabank-mobile-api";
+} from "../../sources/tdcc/protocol";
+import { EInvoiceProtocolUnavailableError } from "../../sources/einvoice/api";
+import { SinopacVerificationRequiredError } from "../../sources/sinopac/connector";
+import { TaishinVerificationRequiredError } from "../../sources/taishin/connector";
+import { HncbVerificationRequiredError } from "../../sources/hncb/connector";
+import { RakutenVerificationRequiredError } from "../../sources/rakuten/connector";
+import { KgibankVerificationRequiredError } from "../../sources/kgibank/connector";
+import { MegabankVerificationRequiredError } from "../../sources/megabank/mobile-api";
 
 export class SyncAlreadyRunningError extends Error {
   constructor(readonly connectorId: ConnectorId) {

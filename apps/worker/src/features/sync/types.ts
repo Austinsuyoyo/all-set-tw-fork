@@ -1,13 +1,6 @@
 import type { ConnectorId, SyncNewRecordCounts } from "@taiwan-fin-hub/shared";
 
-export type SyncScope =
-  | "all"
-  | "investments"
-  | "bank"
-  | "trades"
-  | "investments+bank"
-  | "investments+trades"
-  | "bank+trades";
+export type SyncScope = "all" | "investments" | "bank" | "trades";
 
 export const SYNC_SCOPE_ALL = "all";
 

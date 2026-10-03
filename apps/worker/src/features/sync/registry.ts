@@ -5,59 +5,54 @@ import {
   prepareSinopacCaptchaSession,
   syncSinopac,
   type SinopacSyncOverrides,
-} from "./sources/sinopac";
+} from "../../sources/sinopac/sync";
 import {
   prepareHncbCaptchaSession,
   syncHncb,
   type HncbSyncOverrides,
-} from "./sources/hncb";
+} from "../../sources/hncb/sync";
 import {
   prepareKgibankCaptchaSession,
   syncKgibank,
   type KgibankSyncOverrides,
-} from "./sources/kgibank";
+} from "../../sources/kgibank/sync";
 import {
   prepareRakutenCaptchaSession,
   syncRakuten,
   type RakutenSyncOverrides,
-} from "./sources/rakuten";
+} from "../../sources/rakuten/sync";
 import {
   prepareTaishinCaptchaSession,
   syncTaishin,
   type TaishinSyncOverrides,
-} from "./sources/taishin";
+} from "../../sources/taishin/sync";
 import {
   prepareObankCaptchaSession,
   syncObank,
   type ObankSyncOverrides,
-} from "./sources/obank";
+} from "../../sources/obank/sync";
 import {
   prepareFirstbankCaptchaSession,
   syncFirstbank,
   type FirstbankSyncOverrides,
-} from "./sources/firstbank";
+} from "../../sources/firstbank/sync";
 import {
   prepareMegabankCaptchaSession,
   syncMegabank,
   type MegabankSyncOverrides,
-} from "./sources/megabank";
-import { syncCathaybk, type CathaySyncOverrides } from "./sources/cathaybk";
-import { syncCtbc } from "./sources/ctbc";
-import { syncSkbank } from "./sources/skbank";
-import { syncEsun } from "./sources/esun";
+} from "../../sources/megabank/sync";
+import {
+  syncCathaybk,
+  type CathaySyncOverrides,
+} from "../../sources/cathaybk/sync";
+import { syncCtbc } from "../../sources/ctbc/sync";
+import { syncSkbank } from "../../sources/skbank/sync";
+import { syncEsun } from "../../sources/esun/sync";
 import {
   syncNextbank,
   prepareNextbankCaptchaSession,
-} from "./sources/nextbank";
-import { syncTdcc, type TdccSyncOverrides } from "./sources/tdcc";
-import {
-  SYNC_SCOPE_ALL,
-  TDCC_SCOPE_BANK,
-  TDCC_SCOPE_INVESTMENTS,
-  TDCC_SCOPE_TRADES,
-  type SyncOutcome,
-  type SyncScope,
-} from "./types";
+} from "../../sources/nextbank/sync";
+import { SYNC_SCOPE_ALL, type SyncOutcome, type SyncScope } from "./types";
 
 type ConnectorRuntimeDefinition = {
   run: (
@@ -81,13 +76,11 @@ export const connectorRuntimeRegistry: Record<
     },
   },
   tdcc: {
-    run: (env, trigger, scope, overrides) =>
-      syncTdcc(
-        env,
-        trigger,
-        overrides as TdccSyncOverrides,
-        scope === SYNC_SCOPE_ALL ? tdccAllScopes() : [scope],
-      ),
+    run: async () => {
+      throw new Error(
+        "TDCC sync must be started through its durable Queue flow.",
+      );
+    },
   },
   esun: {
     run: (env, trigger) => syncEsun(env, trigger),
@@ -177,8 +170,4 @@ export function prepareConnectorChallenge(env: Env, connectorId: ConnectorId) {
     );
   }
   return prepare(env);
-}
-
-function tdccAllScopes(): SyncScope[] {
-  return [TDCC_SCOPE_INVESTMENTS, TDCC_SCOPE_BANK, TDCC_SCOPE_TRADES];
 }
