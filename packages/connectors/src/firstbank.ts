@@ -37,7 +37,8 @@ export function parseFirstbankConfig(config: unknown): FirstbankConfig {
 export type FirstbankPayloads = {
   hasCreditCard?: boolean;
   depositOverviewHtml?: string;
-  transactionHistoryHtml?: string;
+  /** 每個存款帳戶各查一次交易明細；舊版只查第一個帳戶時為單一字串。 */
+  transactionHistoryHtml?: string | string[];
   cardBill?: unknown;
   cardUnbilled?: unknown;
   recentPayments?: unknown;
@@ -183,12 +184,13 @@ export function parseFirstbankData(
   const deposits = payloads.depositOverviewHtml
     ? parseDepositOverviewHtml(payloads.depositOverviewHtml, asOfAt)
     : emptyDepositParse();
-  const bankTransactions = payloads.transactionHistoryHtml
-    ? parseTransactionHistoryHtml(
-        payloads.transactionHistoryHtml,
-        deposits.accounts,
-      )
-    : [];
+  const bankTransactions = (
+    Array.isArray(payloads.transactionHistoryHtml)
+      ? payloads.transactionHistoryHtml
+      : payloads.transactionHistoryHtml
+        ? [payloads.transactionHistoryHtml]
+        : []
+  ).flatMap((html) => parseTransactionHistoryHtml(html, deposits.accounts));
   const cards =
     payloads.hasCreditCard === false
       ? { bankAccounts: [], snapshots: [], transactions: [], bills: [] }
@@ -1217,13 +1219,17 @@ function extractHtmlRows(html: string): HtmlRow[] {
 }
 
 function findPageAccountIdentity(text: string) {
-  const accountLabel =
-    /(?:帳號|帳戶|賬號|account(?:\s*(?:no\.?|number))?)\s*[：:]?\s*([^\s，,；;|<]+)/i.exec(
-      text,
-    );
-  return accountLabel?.[1]
-    ? extractAccountIdentity(accountLabel[1])?.token
-    : undefined;
+  // 頁面說明（如「帳戶交易明細查詢提供交易時間資訊」）可能比「帳號 …」先出現，
+  // 逐一檢查每個標籤，取第一個真的帶帳號數字的值。
+  for (const accountLabel of text.matchAll(
+    /(?:帳號|帳戶|賬號|account(?:\s*(?:no\.?|number))?)\s*[：:]?\s*([^\s，,；;|<]+)/gi,
+  )) {
+    const token = accountLabel[1]
+      ? extractAccountIdentity(accountLabel[1])?.token
+      : undefined;
+    if (token) return token;
+  }
+  return undefined;
 }
 
 function extractAccountIdentity(value: unknown) {

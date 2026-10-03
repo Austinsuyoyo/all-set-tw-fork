@@ -61,6 +61,13 @@ const FRAME_PROBE_TIMEOUT_MS = 1_000;
 // local recorder, so keep enough headroom and fail closed if a dispatched card
 // query never produces its expected response.
 const CARD_RESPONSE_TIMEOUT_MS = 30_000;
+// Live no-card account: the card bridge goes netbanktrust -> BillingQuery ->
+// Home/Logout ("您已登出信用卡會員服務系統") without any card API or no-card text.
+const CARD_MEMBER_LOGOUT_PATH = "/cmsweb/Home/Logout";
+// The query page lists one account per option and returns one account per
+// search; cap the loop so an unexpected option list cannot run unbounded.
+const MAX_TRANSACTION_QUERY_ACCOUNTS = 10;
+const NETBANK_LOGOUT_SETTLE_MS = 2_000;
 const SESSION_RELEASE_TIMEOUT_MS = 2_000;
 const SESSION_RELEASE_POLL_MS = 100;
 const MAX_SERIALIZED_TABLE_BYTES = 512 * 1024;
@@ -87,6 +94,7 @@ type CardPayloadKey = "cardBill" | "recentPayments" | "cardUnbilled";
 
 type CapturedCardResponses = Partial<Record<CardPayloadKey, unknown>> & {
   noCreditCard?: boolean;
+  cardMemberLoggedOut?: boolean;
 };
 
 type DepositResponseCapture = {
@@ -142,6 +150,7 @@ type NetworkRequestWillBeSentEvent = {
 
 type FetchRequestPausedEvent = {
   requestId: string;
+  networkId?: string;
   resourceType?: string;
   request: { url: string };
   responseStatusCode?: number;
@@ -149,6 +158,7 @@ type FetchRequestPausedEvent = {
 
 type BrowserResponse = {
   url(): string;
+  request?(): object;
   status(): number;
   json(): Promise<unknown>;
   text(): Promise<string>;
@@ -927,7 +937,26 @@ async function collectFirstbankPayloads(
   const captured: CapturedCardResponses = {};
   const responseTasks: Promise<void>[] = [];
   const depositResponse = createDepositResponseCapture();
-  const transactionResponse = createTransactionResponseCapture();
+  let transactionResponse = createTransactionResponseCapture();
+  // Each account query gets a new capture. Bind every bank request to the
+  // capture that was current when it was sent, so a late CDP or HTTP event
+  // from the previous account can never settle the next account's capture.
+  const transactionRequestCaptures = new Map<
+    string,
+    TransactionResponseCapture
+  >();
+  const captureForRequest = (requestId: string | undefined) =>
+    (requestId && transactionRequestCaptures.get(requestId)) ||
+    transactionResponse;
+  // Puppeteer exposes no public request id on HTTPResponse, so page-level
+  // responses are bound through their request object instead.
+  const transactionPageRequestCaptures = new WeakMap<
+    object,
+    TransactionResponseCapture
+  >();
+  const onPageRequest = (request: object) => {
+    transactionPageRequestCaptures.set(request, transactionResponse);
+  };
   const cdp = await page.createCDPSession();
   try {
     await cdp.send("Network.enable", {
@@ -964,6 +993,7 @@ async function collectFirstbankPayloads(
         resourceType: event.type,
       });
     }
+    transactionRequestCaptures.set(event.requestId, transactionResponse);
     const path = urlPathname(url);
     if (isCapturableResourceType(event.type)) {
       transactionResponse.inFlight.set(event.requestId, {
@@ -986,7 +1016,8 @@ async function collectFirstbankPayloads(
   ) => {
     const url = event.response.url;
     if (!isFirstbankUrl(url)) return;
-    transactionResponse.inFlight.delete(event.requestId);
+    const capture = captureForRequest(event.requestId);
+    capture.inFlight.delete(event.requestId);
     const path = urlPathname(url);
     const status = event.response.status;
     const resourceType = event.type;
@@ -998,24 +1029,24 @@ async function collectFirstbankPayloads(
       });
     }
     if (
-      transactionResponse.armed &&
+      capture.armed &&
       isTransactionVerificationResponse(url) &&
-      transactionResponse.verificationRequestIds.delete(event.requestId)
+      capture.verificationRequestIds.delete(event.requestId)
     ) {
-      transactionResponse.verificationResponded = true;
-      transactionResponse.verificationSettledAt = Date.now();
+      capture.verificationResponded = true;
+      capture.verificationSettledAt = Date.now();
       if (typeof status === "number" && (status < 200 || status >= 400)) {
-        transactionResponse.verificationFailed = true;
+        capture.verificationFailed = true;
       }
       logFirstbankStage("0101-verification-response", {
         path,
         status,
         resourceType,
-        elapsedMs: elapsedSinceArmed(transactionResponse),
+        elapsedMs: elapsedSinceArmed(capture),
       });
     }
     if (
-      transactionResponse.armed &&
+      capture.armed &&
       isTransactionResultResponse(url) &&
       isCapturableResourceType(resourceType)
     ) {
@@ -1023,49 +1054,52 @@ async function collectFirstbankPayloads(
         path,
         status,
         resourceType,
-        elapsedMs: elapsedSinceArmed(transactionResponse),
+        elapsedMs: elapsedSinceArmed(capture),
       });
-      transactionResponse.requestIds.add(event.requestId);
-      transactionResponse.documentMeta.set(event.requestId, { path, status });
+      capture.requestIds.add(event.requestId);
+      capture.documentMeta.set(event.requestId, { path, status });
     }
   };
   const onTransactionDocumentLoaded = (event: TransactionLoadingEvent) => {
-    transactionResponse.inFlight.delete(event.requestId);
-    if (!transactionResponse.requestIds.has(event.requestId)) return;
-    const meta = transactionResponse.documentMeta.get(event.requestId);
+    const capture = captureForRequest(event.requestId);
+    capture.inFlight.delete(event.requestId);
+    if (!capture.requestIds.has(event.requestId)) return;
+    const meta = capture.documentMeta.get(event.requestId);
     let task: Promise<void>;
     task = captureTransactionDocument(
       cdp,
       event.requestId,
-      transactionResponse,
+      capture,
       meta,
     ).finally(() => {
-      transactionResponse.requestIds.delete(event.requestId);
-      transactionResponse.documentMeta.delete(event.requestId);
-      transactionResponse.pending.delete(task);
+      capture.requestIds.delete(event.requestId);
+      capture.documentMeta.delete(event.requestId);
+      capture.pending.delete(task);
     });
-    transactionResponse.pending.add(task);
+    capture.pending.add(task);
     void task.catch(() => undefined);
   };
   const onTransactionDocumentFailed = (event: TransactionLoadingEvent) => {
-    transactionResponse.inFlight.delete(event.requestId);
-    if (transactionResponse.verificationRequestIds.delete(event.requestId)) {
-      transactionResponse.verificationFailed = true;
-      transactionResponse.verificationSettledAt = Date.now();
+    const capture = captureForRequest(event.requestId);
+    capture.inFlight.delete(event.requestId);
+    if (capture.verificationRequestIds.delete(event.requestId)) {
+      capture.verificationFailed = true;
+      capture.verificationSettledAt = Date.now();
       logFirstbankStage("0101-verification-failed", {
         path: "/NetBank/2/verifyDV.html",
-        elapsedMs: elapsedSinceArmed(transactionResponse),
+        elapsedMs: elapsedSinceArmed(capture),
       });
     }
-    transactionResponse.requestIds.delete(event.requestId);
-    transactionResponse.documentMeta.delete(event.requestId);
+    capture.requestIds.delete(event.requestId);
+    capture.documentMeta.delete(event.requestId);
   };
   const onFetchPaused = (event: FetchRequestPausedEvent) => {
+    const capture = captureForRequest(event.networkId);
     let task: Promise<void>;
-    task = captureFetchPausedDocument(cdp, event, transactionResponse).finally(
-      () => transactionResponse.pending.delete(task),
+    task = captureFetchPausedDocument(cdp, event, capture).finally(() =>
+      capture.pending.delete(task),
     );
-    transactionResponse.pending.add(task);
+    capture.pending.add(task);
     void task.catch(() => undefined);
   };
   cdp.on("Network.requestWillBeSent", onTransactionRequest);
@@ -1084,25 +1118,42 @@ async function collectFirstbankPayloads(
       void task.catch(() => undefined);
       return;
     }
-    if (
-      transactionResponse.armed &&
-      isTransactionResultResponse(response.url())
-    ) {
+    const request = response.request?.();
+    const capture =
+      (request && transactionPageRequestCaptures.get(request)) ||
+      transactionResponse;
+    if (capture.armed && isTransactionResultResponse(response.url())) {
       logFirstbankStage("010103-http-response", {
         path: urlPathname(response.url()),
         status: httpStatus(response),
-        elapsedMs: elapsedSinceArmed(transactionResponse),
+        elapsedMs: elapsedSinceArmed(capture),
       });
       let task: Promise<void>;
-      task = captureTransactionResponse(response, transactionResponse).finally(
-        () => transactionResponse.pending.delete(task),
+      task = captureTransactionResponse(response, capture).finally(() =>
+        capture.pending.delete(task),
       );
-      transactionResponse.pending.add(task);
+      capture.pending.add(task);
       void task.catch(() => undefined);
       return;
     }
+    // Only before any card API response is seen: a logout after one arrived,
+    // even if its body is still being read or was rejected, must not turn a
+    // card holder into a no-card result.
+    if (
+      collectingCards &&
+      !cardResponseObserved &&
+      urlPathname(response.url()) === CARD_MEMBER_LOGOUT_PATH
+    ) {
+      captured.noCreditCard = true;
+      captured.cardMemberLoggedOut = true;
+      logFirstbankStage("card-member-logout", {
+        path: CARD_MEMBER_LOGOUT_PATH,
+        status: httpStatus(response),
+      });
+    }
     const key = cardResponseKey(response.url());
     if (!key) return;
+    cardResponseObserved = true;
     logFirstbankStage("card-http-response", {
       path: urlPathname(response.url()),
       status: httpStatus(response),
@@ -1112,12 +1163,14 @@ async function collectFirstbankPayloads(
     responseTasks.push(task);
     void task.catch(() => undefined);
   };
+  page.on("request", onPageRequest);
   page.on("response", onResponse);
   // A native confirm/alert raised by the bank's own handlers freezes the
   // renderer until it is answered, which stalls every in-flight request and
   // every CDP event for that frame. Keep one accepting listener attached for
   // the whole collection so the query can never wedge behind a dialog.
   let collectingCards = false;
+  let cardResponseObserved = false;
   const onDialog = (dialog: Dialog) => {
     if (collectingCards && isNoCreditCardMessage(dialog.message()))
       captured.noCreditCard = true;
@@ -1170,16 +1223,37 @@ async function collectFirstbankPayloads(
       overviewFrame,
     );
 
-    await navigateFrame(depositFrame, TRANSACTION_URL);
-    const queryFrame = await waitForLiveTransactionQueryFrame(
-      page,
-      depositFrame,
-    );
-    const transactionHistoryHtml = await submitTransactionQuery(
-      page,
-      queryFrame,
-      transactionResponse,
-    );
+    const transactionHistoryHtml: string[] = [];
+    let queryFrame = depositFrame;
+    let accountCount = 1;
+    for (let accountIndex = 0; accountIndex < accountCount; accountIndex += 1) {
+      if (accountIndex > 0) {
+        // Requests already sent stay bound to the previous capture (see
+        // transactionRequestCaptures), so their late events cannot settle
+        // the next account's capture.
+        await withActionTimeout(
+          Promise.allSettled(Array.from(transactionResponse.pending)),
+          RESULT_CAPTURE_WAIT_MS,
+        ).catch(() => undefined);
+        transactionResponse = createTransactionResponseCapture();
+      }
+      await navigateFrame(depositFrame, TRANSACTION_URL);
+      queryFrame = await waitForLiveTransactionQueryFrame(page, depositFrame);
+      const query = await submitTransactionQuery(
+        page,
+        queryFrame,
+        transactionResponse,
+        accountIndex,
+      );
+      transactionHistoryHtml.push(query.html);
+      accountCount = Math.min(
+        query.accountCount,
+        MAX_TRANSACTION_QUERY_ACCOUNTS,
+      );
+      logFirstbankStage("0101-account-complete", {
+        detail: `${accountIndex + 1}/${accountCount}`,
+      });
+    }
     const cardFrame = pickCardNavigationFrame(page, depositFrame) ?? queryFrame;
     collectingCards = true;
     await collectCardPayloads(page, cardFrame, captured);
@@ -1196,12 +1270,20 @@ async function collectFirstbankPayloads(
         : captured.recentPayments,
     } as unknown as FirstbankPayloads;
   } finally {
+    // The card member logout also invalidates the NetBank session, but the
+    // bank keeps its single-login lock for about ten minutes. Release it with
+    // the frameset's own logout() even when collection fails afterwards, so
+    // the next sync is not MULTI_SESSION_LOGIN.
+    if (captured.cardMemberLoggedOut) {
+      await logoutNetbank(page).catch(() => undefined);
+    }
     if (transactionResponse.pending.size > 0) {
       await withActionTimeout(
         Promise.allSettled(Array.from(transactionResponse.pending)),
         RESULT_CAPTURE_WAIT_MS,
       ).catch(() => undefined);
     }
+    page.off("request", onPageRequest);
     page.off("response", onResponse);
     page.off("dialog", onDialog);
     page.off("pageerror", onPageError);
@@ -1215,6 +1297,27 @@ async function collectFirstbankPayloads(
     }
     await cdp.detach().catch(() => undefined);
   }
+}
+
+async function logoutNetbank(page: Page) {
+  const framePath = urlPathname(FRAME_URL);
+  const frameset = liveFrames(page).find(
+    (candidate) => framePathname(candidate) === framePath,
+  );
+  const invoked = frameset
+    ? await withActionTimeout(
+        frameset.evaluate(() => {
+          const logout = (window as Window & { logout?: () => void }).logout;
+          if (typeof logout !== "function") return false;
+          logout();
+          return true;
+        }),
+      ).catch(() => false)
+    : false;
+  logFirstbankStage(invoked ? "netbank-logout" : "netbank-logout-unavailable", {
+    path: frameset ? framePathname(frameset) : undefined,
+  });
+  if (invoked) await delay(NETBANK_LOGOUT_SETTLE_MS);
 }
 
 const CARD_QUERIES = [
@@ -1779,9 +1882,11 @@ async function submitTransactionQuery(
   page: Page,
   frame: Frame,
   transactionResponse: TransactionResponseCapture,
+  accountIndex: number,
 ) {
   const deadline = Date.now() + ACTION_TIMEOUT_MS;
   let queryFrame = frame;
+  let accountCount = 0;
   for (;;) {
     queryFrame = await waitForLiveTransactionQueryFrame(
       page,
@@ -1799,7 +1904,8 @@ async function submitTransactionQuery(
       queryFrame = accountFrame;
       continue;
     }
-    if (!(await selectQueryAccount(queryFrame))) {
+    accountCount = await selectQueryAccount(queryFrame, false, accountIndex);
+    if (!accountCount) {
       const replacement = await findLiveTransactionQueryFrame(page, queryFrame);
       if (replacement && replacement !== queryFrame) {
         queryFrame = replacement;
@@ -1827,7 +1933,10 @@ async function submitTransactionQuery(
     path: urlPathname(TRANSACTION_URL),
   });
   await clickTransactionSearch(queryFrame);
-  return waitForTransactionHistory(page, transactionResponse);
+  return {
+    html: await waitForTransactionHistory(page, transactionResponse),
+    accountCount,
+  };
 }
 
 async function waitForTransactionHistory(
@@ -2079,11 +2188,18 @@ async function waitForQueryAccountOptions(
   throw new FirstbankConnectionError("第一銀行交易明細查詢帳號無法選取。");
 }
 
-async function selectQueryAccount(frame: Frame, dryRun = false) {
+// Returns how many accounts the query page offers; 0 means no account could be
+// read or selected.
+async function selectQueryAccount(
+  frame: Frame,
+  dryRun = false,
+  accountIndex = 0,
+) {
+  const selection = [!dryRun, accountIndex] as const;
   try {
-    return Boolean(
+    return Number(
       await withActionTimeout(
-        frame.evaluate((shouldSelect) => {
+        frame.evaluate(([shouldSelect, index]) => {
           type QueryAccountSelect = {
             options: ArrayLike<{
               selected: boolean;
@@ -2107,27 +2223,28 @@ async function selectQueryAccount(frame: Frame, dryRun = false) {
           const select = document.querySelector(
             'select[name="acnt"]',
           ) as QueryAccountSelect | null;
-          if (!select) return false;
-          const option = Array.from(select.options).find(
+          if (!select) return 0;
+          const accounts = Array.from(select.options).filter(
             (candidate) => !isPlaceholder(candidate.text, candidate.value),
           );
-          if (!option) return false;
-          if (!shouldSelect) return true;
+          const option = accounts[index];
+          if (!option) return 0;
+          if (!shouldSelect) return accounts.length;
           select.value = option.value;
           option.selected = true;
           select.dispatchEvent(new Event("input", { bubbles: true }));
           select.dispatchEvent(new Event("change", { bubbles: true }));
           const selected = select.options[select.selectedIndex];
-          return (
-            select.value === option.value &&
+          return select.value === option.value &&
             selected !== undefined &&
             !isPlaceholder(selected.text, selected.value)
-          );
-        }, !dryRun),
+            ? accounts.length
+            : 0;
+        }, selection),
       ),
     );
   } catch {
-    return false;
+    return 0;
   }
 }
 
