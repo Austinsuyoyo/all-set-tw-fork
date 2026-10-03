@@ -22,11 +22,16 @@ const depositOverviewHtml = `
   </table>
 `;
 
-/** 版面取自實際的 010103 頁面：交易時間說明排在「帳號」之前；帳號與金額為合成資料。 */
+/**
+ * 版面取自 Worker 實際送進 parser 的 010103 內容：Worker 只保留 <table>，交易時間
+ * 說明與「帳號」都在表格內，且說明排在帳號前面；帳號與金額為合成資料。
+ */
 function transactionPage(accountNumber: string, deposit: string) {
   return `
-    <div>交易明細起迄日 自115/9/10起，帳戶交易明細查詢提供交易時間資訊。</div>
-    <div>帳號 ${accountNumber}</div>
+    <table>
+      <tr><td>交易明細起迄日 自115/9/10起，帳戶交易明細查詢提供交易時間資訊。</td></tr>
+      <tr><td>帳號 ${accountNumber}</td></tr>
+    </table>
     <table>
       <tr class="ResultHeader">
         <td>交易<br>日期</td><td>交易類別</td><td>支出<br>金額</td>

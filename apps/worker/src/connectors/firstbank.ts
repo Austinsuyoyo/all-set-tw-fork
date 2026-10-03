@@ -1109,14 +1109,13 @@ async function collectFirstbankPayloads(
       void task.catch(() => undefined);
       return;
     }
-    // Only before any card payload arrives: a logout after a captured payload
-    // must not discard that data as a no-card result.
+    // Only before any card API response is seen: a logout after one arrived,
+    // even if its body is still being read or was rejected, must not turn a
+    // card holder into a no-card result.
     if (
       collectingCards &&
-      urlPathname(response.url()) === CARD_MEMBER_LOGOUT_PATH &&
-      !CARD_QUERIES.some(({ key }) =>
-        Object.prototype.hasOwnProperty.call(captured, key),
-      )
+      !cardResponseObserved &&
+      urlPathname(response.url()) === CARD_MEMBER_LOGOUT_PATH
     ) {
       captured.noCreditCard = true;
       captured.cardMemberLoggedOut = true;
@@ -1127,6 +1126,7 @@ async function collectFirstbankPayloads(
     }
     const key = cardResponseKey(response.url());
     if (!key) return;
+    cardResponseObserved = true;
     logFirstbankStage("card-http-response", {
       path: urlPathname(response.url()),
       status: httpStatus(response),
@@ -1142,6 +1142,7 @@ async function collectFirstbankPayloads(
   // every CDP event for that frame. Keep one accepting listener attached for
   // the whole collection so the query can never wedge behind a dialog.
   let collectingCards = false;
+  let cardResponseObserved = false;
   const onDialog = (dialog: Dialog) => {
     if (collectingCards && isNoCreditCardMessage(dialog.message()))
       captured.noCreditCard = true;
