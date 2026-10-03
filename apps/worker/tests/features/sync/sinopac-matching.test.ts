@@ -19,6 +19,16 @@ const row = (
   description,
 });
 describe("Sinopac authorization assignment", () => {
+  it("does not match deposit transactions to credit-card authorizations", () => {
+    const deposit = {
+      ...row("2", -100, "TWD"),
+      sourceId: "sinopac:deposit:tx:2345:2026-09-04:2",
+    };
+    expect(
+      matchSinopacAuthorizations([row("1", -100, "TWD")], [deposit], {}),
+    ).toEqual([]);
+  });
+
   it("matches cross currency merchants only within the same card and day, excluding fees", () => {
     const a = row("1", -1096, "TWD", "餐廳/UNAGISHIKISHIMA");
     const b = row("2", -5500, "JPY", "A- UNAGISHIKISHIMA OKINAWA JP");

@@ -531,6 +531,76 @@ describe("staged sync persistence", () => {
     });
   });
 
+  it("links TDCC bank 807 records to the Sinopac deposit of the same currency", async () => {
+    const db = createDb();
+    const d1 = db as unknown as D1Database;
+    const now = "2026-10-03T04:00:00Z";
+    const sourceId = "bank:sinopac:2345:0123456789abcdef:TWD";
+    const direct = mapAccount(
+      "sinopac",
+      {
+        sourceId,
+        accountType: "savings",
+        currency: "TWD",
+      },
+      now,
+    );
+    const tdcc = mapAccount(
+      "tdcc",
+      {
+        sourceId: "settlement:807:0000000012345",
+        accountType: "settlement_cash",
+        currency: "TWD",
+      },
+      now,
+    );
+    const foreign = mapAccount(
+      "tdcc",
+      {
+        sourceId: "settlement:807:0000000012345:USD",
+        accountType: "settlement_cash",
+        currency: "USD",
+      },
+      now,
+    );
+    const balance = (connectorId: "sinopac" | "tdcc", accountId: string) =>
+      mapBalance(
+        connectorId,
+        {
+          accountId,
+          sourceId: "balance:2026-10-03",
+          balance: 12000,
+          currency: "TWD",
+          asOfAt: now,
+        },
+        now,
+      );
+    const records = [
+      direct,
+      tdcc,
+      foreign,
+      balance("sinopac", sourceId),
+      balance("tdcc", "settlement:807:0000000012345"),
+    ];
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await persistStagedSyncWrite(d1, {
+        records,
+        afterPromoteStatements: [linkCanonicalBankAccountsStatement(d1)],
+      });
+    }
+    expect(
+      db.database
+        .prepare("SELECT canonical_account_id FROM bank_accounts WHERE id = ?")
+        .get(tdcc.recordKey),
+    ).toEqual({ canonical_account_id: direct.recordKey });
+    expect(
+      db.database
+        .prepare("SELECT canonical_account_id FROM bank_accounts WHERE id = ?")
+        .get(foreign.recordKey),
+    ).toEqual({ canonical_account_id: null });
+    expect(await calculateBankDepositValue(d1, "2026-10-03")).toBe(12000);
+  });
+
   it("links TDCC bank 822 records to the direct CTBC account", async () => {
     const db = createDb();
     db.database.exec(`

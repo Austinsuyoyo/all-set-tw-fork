@@ -14,12 +14,14 @@ import type {
 } from "@taiwan-fin-hub/core";
 import {
   BANK_SYNC_MONTHS,
+  fetchSinopacDeposits,
+  isSinopacDepositEmptyTransactions,
   isNoCreditCardMessage,
   type SinopacConfig,
 } from "@taiwan-fin-hub/connectors";
 
 const MOBILE_HOST = "https://m.sinopac.com";
-const LOGIN_URL = `${MOBILE_HOST}/m/member/login/m_login.aspx?RequestTrans=MobileCard`;
+const LOGIN_URL = `${MOBILE_HOST}/m/member/login/m_login.aspx`;
 const CARD_SUMMARY_PATH = "/ws/card/cardqry/ws_cardsum.ashx";
 const CARD_BILLS_PATH = "/ws/card/cardqry/ws_cardbilling_sp.ashx";
 const CARD_SSO_PATH = "/m/SinoCard/api/security/sso";
@@ -165,13 +167,23 @@ export function createSinopacConnector(
         config.userId,
         fetchImpl,
       );
+      const now = new Date();
+      const deposits = await client.fetchDeposits(now);
       const payloads = await client.fetchCreditCards();
       const cards = parseSinopacCardData(payloads);
-      const now = new Date();
 
       return {
         records: [],
         ...cards,
+        bankAccounts: [...deposits.bankAccounts, ...cards.bankAccounts],
+        bankBalanceSnapshots: [
+          ...deposits.bankBalanceSnapshots,
+          ...cards.bankBalanceSnapshots,
+        ],
+        bankTransactions: [
+          ...deposits.bankTransactions,
+          ...cards.bankTransactions,
+        ],
         cursor: JSON.stringify({
           sessionCookies,
           protocol: SINOPAC_SESSION_PROTOCOL,
@@ -197,6 +209,13 @@ class SinopacAppClient {
 
   fetchSummary() {
     return this.post(CARD_SUMMARY_PATH, "信用卡總覽");
+  }
+
+  fetchDeposits(now: Date) {
+    return fetchSinopacDeposits(
+      (path, label, body) => this.post(path, label, body.toString()),
+      now,
+    );
   }
 
   async fetchCreditCards(): Promise<SinopacApiPayloads> {
@@ -259,7 +278,7 @@ class SinopacAppClient {
     };
   }
 
-  private async post(path: string, label: string) {
+  private async post(path: string, label: string, body = "") {
     const response = await this.fetchImpl.call(
       globalThis,
       `${MOBILE_HOST}${path}`,
@@ -273,7 +292,7 @@ class SinopacAppClient {
           "User-Agent": ANDROID_USER_AGENT,
           "X-Requested-With": "XMLHttpRequest",
         },
-        body: "",
+        body,
       },
     );
     const text = await response.text();
@@ -292,8 +311,15 @@ class SinopacAppClient {
       }
       throw new Error(`永豐${label} API 回應不是有效 JSON。`);
     }
-    assertSinopacApiSuccess(payload, label);
+    const creditCardStage = path.startsWith("/ws/card/");
     if (
+      path === "/ws/bank/transdetail/ws_transdetailMerge.ashx" &&
+      isSinopacDepositEmptyTransactions(payload)
+    )
+      return payload;
+    assertSinopacApiSuccess(payload, label, creditCardStage);
+    if (
+      creditCardStage &&
       flattenRecords(payload).some((record) =>
         isNoCreditCardMessage(record.Message),
       )
@@ -787,7 +813,11 @@ function splitCombinedSetCookie(value: string) {
     : [];
 }
 
-function assertSinopacApiSuccess(payload: unknown, label: string) {
+function assertSinopacApiSuccess(
+  payload: unknown,
+  label: string,
+  creditCardStage: boolean,
+) {
   const envelope = flattenRecords(payload).find(
     (record) => typeof record.Header === "string",
   );
@@ -799,9 +829,17 @@ function assertSinopacApiSuccess(payload: unknown, label: string) {
       "永豐銀行 session 已失效，請重新完成圖形驗證。",
     );
   }
-  if (message === "查無消費紀錄" || isNoCreditCardMessage(message)) return;
+  if (
+    creditCardStage &&
+    (message === "查無消費紀錄" || isNoCreditCardMessage(message))
+  )
+    return;
   if (header !== "SUCCESS")
-    throw new Error(`永豐${label} API 失敗：${message}`);
+    throw new Error(
+      creditCardStage
+        ? `永豐${label} API 失敗：${message}`
+        : `永豐${label} API 失敗。`,
+    );
 }
 
 function assertSinoCardApiSuccess(payload: unknown, label: string) {
@@ -1118,7 +1156,9 @@ function parseSinoCardAccounting(payload: unknown) {
     const currency =
       currencyValue === "歐元" ? "EUR" : normalizeCurrency(currencyValue);
     const statementAmount = parseAmount(stringValue(row.CURRBAL));
-    const paidAmount = parseAmount(stringValue(row.TotalPaymentAmt));
+    // SinoCard uses "-" for no payments posted to the current bill.
+    const paymentValue = stringValue(row.TotalPaymentAmt).trim();
+    const paidAmount = paymentValue === "-" ? 0 : parseAmount(paymentValue);
     if (
       !closingDate ||
       statementAmount == null ||

@@ -34,11 +34,13 @@ describe("credit card balance availability", () => {
         bills: [],
       });
       if (balance == null) {
-        expect(screen.getByText("金額尚未取得")).toBeInTheDocument();
+        expect(screen.getByText("剩餘應繳金額未取得")).toBeInTheDocument();
         expect(screen.getByText("資料不完整")).toBeInTheDocument();
         expect(screen.queryByText("JP¥0")).not.toBeInTheDocument();
       } else {
-        expect(screen.queryByText("金額尚未取得")).not.toBeInTheDocument();
+        expect(
+          screen.queryByText("剩餘應繳金額未取得"),
+        ).not.toBeInTheDocument();
         expect(screen.queryByText("資料不完整")).not.toBeInTheDocument();
         expect(
           screen.getByText(
@@ -52,6 +54,44 @@ describe("credit card balance availability", () => {
       }
     },
   );
+
+  it("顯示永豐各幣別本期欠款與待繳狀態", () => {
+    const accounts = [
+      { id: "twd", currency: "TWD", balance: -2000 },
+      { id: "jpy", currency: "JPY", balance: -10000 },
+    ].map((account) => ({
+      ...account,
+      connectorId: "sinopac" as const,
+      sourceId: account.id,
+      accountType: "credit",
+      paymentDueDate: "2026-10-08",
+    }));
+    const summary = calculateAssetSummary({
+      bank: { accounts, transactions: [] },
+      investments: [],
+      manualAssets: [],
+      rates: [{ currency: "JPY", rateTwd: 0.2, updatedAt: "2026-10-03" }],
+    });
+    render(InstitutionDetails, {
+      group: summary.institutionGroups[0],
+      bills: accounts.map((account) => ({
+        id: `bill:${account.id}`,
+        connectorId: "sinopac" as const,
+        accountId: account.id,
+        sourceId: `bill:${account.id}`,
+        billingPeriod: "2026-09",
+        statementAmount: -account.balance,
+        paidAmount: 0,
+        isPaid: 0,
+        paymentDueDate: "2026-10-08",
+        currency: account.currency,
+      })),
+    });
+    expect(screen.getAllByText("帳單待繳 · 期限 2026/10/8")).toHaveLength(2);
+    expect(screen.getAllByText(/2026-09.*待繳/)).toHaveLength(2);
+    expect(screen.getByText("−JP¥10,000")).toBeInTheDocument();
+    expect(screen.queryByText("資料不完整")).not.toBeInTheDocument();
+  });
 
   it("shows the latest bill deadline and each Mega Bank bill's payment status", () => {
     const summary = calculateAssetSummary({

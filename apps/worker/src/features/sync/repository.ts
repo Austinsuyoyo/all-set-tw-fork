@@ -321,6 +321,7 @@ export function reconcileHncbLegacyTransactionStatements(db: D1Database) {
 const DIRECT_DEPOSIT_CONNECTOR_IDS = [
   "esun",
   "cathaybk",
+  "sinopac",
   "ctbc",
   "skbank",
   "obank",

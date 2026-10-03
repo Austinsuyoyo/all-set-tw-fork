@@ -4,6 +4,28 @@ import {
   normalizeBankAccountDisplay,
 } from "../../../src/features/bank/display";
 
+describe("Sinopac deposit display", () => {
+  it("identifies bank 807 while displaying only the account suffix", () => {
+    const sourceId = "bank:sinopac:2345:0123456789abcdef:USD";
+    expect(deriveBankMatchKey("sinopac", sourceId)).toEqual({
+      bankCode: "807",
+      last4: "2345",
+    });
+    expect(
+      normalizeBankAccountDisplay({
+        connectorId: "sinopac",
+        sourceId,
+        institutionName: null,
+        accountName: null,
+        accountType: "savings",
+      }),
+    ).toMatchObject({
+      institutionName: "永豐銀行",
+      accountName: "末四碼 2345",
+    });
+  });
+});
+
 describe("CTBC bank display", () => {
   it("derives bank code 822 and the account suffix from a CTBC source id", () => {
     expect(deriveBankMatchKey("ctbc", "bank:ctbc:2345:abcd1234")).toEqual({

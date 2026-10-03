@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  sinopacDepositAccounts,
+  sinopacDepositTransactions,
+  sinopacDepositNoTransactions,
+} from "../../../../packages/connectors/tests/fixtures/sinopac-deposits";
+import {
   createSinopacConnector,
   parseAmount,
   parseDate,
@@ -240,6 +245,8 @@ const sessionCookies = JSON.stringify([
 ]);
 
 function payloadForUrl(url: string) {
+  if (url.includes("ws_bankbal"))
+    return [{ Header: "SUCCESS", Message: "", SubInfo: [] }];
   if (url.endsWith("/accounting/accountinginfo"))
     return { ResultCode: "00", Result: { BaseData: {}, BillAmounts: [] } };
   if (url.includes("ws_cardsum")) return summaryPayload;
@@ -253,12 +260,68 @@ function payloadForUrl(url: string) {
 }
 
 describe("sinopac App JSON parser", () => {
+  it("無信用卡仍回傳臺外幣存款與交易，並略過信用卡 SSO", async () => {
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const payload = url.includes("ws_bankbal")
+          ? sinopacDepositAccounts
+          : url.includes("ws_transdetailMerge")
+            ? new URLSearchParams(String(init?.body)).get("Curr") === "TWD"
+              ? sinopacDepositTransactions
+              : sinopacDepositNoTransactions
+            : [{ Header: "FAIL", Message: "您沒有有效卡" }];
+        return new Response(JSON.stringify(payload));
+      },
+    );
+    const result = await createSinopacConnector(
+      undefined,
+      fetchMock as typeof fetch,
+    ).sync({
+      userId: "A123456789",
+      sessionCookies,
+      protocol: "sinopac-mobile-app-json-v1",
+    });
+    expect(result.bankAccounts).toHaveLength(2);
+    expect(result.bankBalanceSnapshots).toHaveLength(2);
+    expect(result.bankTransactions).toHaveLength(2);
+    expect(result.creditCardBills).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(
+      fetchMock.mock.calls.some(([input]) =>
+        String(input).includes("security/sso"),
+      ),
+    ).toBe(false);
+    expect(JSON.parse(result.cursor!)).toMatchObject({ sessionCookies });
+  });
+
+  it.each(["您沒有有效卡", "帳號 0000000012345 暫時無法查詢"])(
+    "存款 API 錯誤不套用無卡成功規則或洩漏帳號：%s",
+    async (message) => {
+      const fetchMock = vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify([{ Header: "FAIL", Message: message, SubInfo: [] }]),
+          ),
+      );
+      await expect(
+        createSinopacConnector(undefined, fetchMock as typeof fetch).sync({
+          userId: "A123456789",
+          sessionCookies,
+          protocol: "sinopac-mobile-app-json-v1",
+        }),
+      ).rejects.toThrow(/^永豐存款總覽 API 失敗。$/);
+    },
+  );
+
   it.each([
     ["0", -10000, false],
     ["3000", -7000, false],
     ["10000", 0, true],
     ["12000", 2000, true],
-    ["-", undefined, undefined],
+    ["-", -10000, false],
+    ["", undefined, undefined],
+    [undefined, undefined, undefined],
   ])(
     "uses per-currency statement and payment amounts (%s)",
     (paid, balance, isPaid) => {
@@ -301,6 +364,59 @@ describe("sinopac App JSON parser", () => {
       else expect(snapshot).toMatchObject({ balance, statementBalance: 10000 });
     },
   );
+
+  it("銀行的未繳標記建立臺外幣欠款與待繳狀態，不沿用上一期繳款", () => {
+    const result = parseSinopacCardData({
+      summary: summaryPayload,
+      bills: billPayload,
+      accountingInfo: {
+        Result: {
+          BaseData: { STMTDATE: "20260723", DUEDATE: "20260807" },
+          BillAmounts: [
+            { CurrencyCode: "000", CURRBAL: "2,000", DUEAMT: "500" },
+            { CurrencyCode: "392", CURRBAL: "10,000.00", DUEAMT: "2,000.00" },
+          ].map((bill) => ({
+            ...bill,
+            TotalPaymentAmt: "-",
+            PaymentRecords: [],
+            LastPaymentDate: "2026/07/07",
+            LastPaymentAmt: "20,000",
+            PREVPAYAMT: "20,000",
+          })),
+        },
+      },
+    });
+    expect(
+      result.creditCardBills.filter((bill) => bill.billingPeriod === "2026-07"),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          currency: "TWD",
+          paidAmount: 0,
+          isPaid: false,
+        }),
+        expect.objectContaining({
+          currency: "JPY",
+          paidAmount: 0,
+          isPaid: false,
+        }),
+      ]),
+    );
+    expect(result.bankBalanceSnapshots).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          currency: "TWD",
+          balance: -2000,
+          noPaymentNeeded: false,
+        }),
+        expect.objectContaining({
+          currency: "JPY",
+          balance: -10000,
+          noPaymentNeeded: false,
+        }),
+      ]),
+    );
+  });
 
   it("rejects malformed accounting data instead of reporting an empty balance", () => {
     expect(() =>
@@ -704,8 +820,9 @@ describe("sinopac App JSON parser", () => {
       protocol: "sinopac-mobile-app-json-v1",
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(7);
+    expect(fetchMock).toHaveBeenCalledTimes(8);
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      "https://m.sinopac.com/ws/bank/bankbal/ws_bankbal.ashx",
       "https://m.sinopac.com/ws/card/cardqry/ws_cardsum.ashx",
       "https://m.sinopac.com/ws/card/cardqry/ws_cardbilling_sp.ashx?TxDate=default&TxType=01",
       "https://m.sinopac.com/m/SinoCard/api/security/sso",
@@ -715,13 +832,13 @@ describe("sinopac App JSON parser", () => {
       "https://m.sinopac.com/m/SinoCard/api/accounting/accountinginfo",
     ]);
     expect(
-      JSON.parse(String(fetchMock.mock.calls[4]?.[1]?.body)),
+      JSON.parse(String(fetchMock.mock.calls[5]?.[1]?.body)),
     ).toMatchObject({
       Content: { ID: "A123456789" },
       Header: { ApplicationName: "MWEB", UserID: "A123456789" },
     });
     expect(
-      JSON.parse(String(fetchMock.mock.calls[5]?.[1]?.body)),
+      JSON.parse(String(fetchMock.mock.calls[6]?.[1]?.body)),
     ).toMatchObject({
       Content: { IsExcludePaidUp: false, ID: "A123456789", DateYYYYMMDD: "" },
     });
@@ -754,7 +871,7 @@ describe("sinopac App JSON parser", () => {
       protocol: "sinopac-mobile-app-json-v1",
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(7);
+    expect(fetchMock).toHaveBeenCalledTimes(8);
     expect(result.bankBalanceSnapshots).toHaveLength(1);
     expect(result.creditCardBills).toHaveLength(1);
     expect(result.bankTransactions).toHaveLength(2);
@@ -790,7 +907,7 @@ describe("sinopac App JSON parser", () => {
       protocol: "sinopac-mobile-app-json-v1",
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(fetchMock).toHaveBeenCalledTimes(6);
     expect(fetchMock.mock.calls.map(([input]) => String(input))).not.toContain(
       "https://m.sinopac.com/m/SinoCard/api/Accounting/OutstandingDetail",
     );
@@ -806,9 +923,13 @@ describe("sinopac App JSON parser", () => {
 
   it("總覽明確回覆無卡時不執行信用卡 SSO", async () => {
     const fetchMock = vi.fn(
-      async () =>
+      async (input: RequestInfo | URL) =>
         new Response(
-          JSON.stringify([{ Header: "FAIL", Message: "您沒有有效卡" }]),
+          JSON.stringify(
+            String(input).includes("ws_bankbal")
+              ? payloadForUrl(String(input))
+              : [{ Header: "FAIL", Message: "您沒有有效卡" }],
+          ),
           { status: 200 },
         ),
     );
@@ -820,7 +941,7 @@ describe("sinopac App JSON parser", () => {
       sessionCookies,
       protocol: "sinopac-mobile-app-json-v1",
     });
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(result).toMatchObject({
       bankAccounts: [],
       bankBalanceSnapshots: [],
@@ -862,15 +983,15 @@ describe("sinopac App JSON parser", () => {
       protocol: "sinopac-mobile-app-json-v1",
     });
 
-    expect(requestCookies).toHaveLength(7);
+    expect(requestCookies).toHaveLength(8);
     expect(
       requestCookies
-        .slice(0, 3)
+        .slice(0, 4)
         .every((cookie) => cookie.includes("sinopac_cookie=browser-cookie")),
     ).toBe(true);
-    expect(requestCookies[3]).toContain("sinopac_cookie=api-cookie-3");
     expect(requestCookies[4]).toContain("sinopac_cookie=api-cookie-4");
     expect(requestCookies[5]).toContain("sinopac_cookie=api-cookie-5");
+    expect(requestCookies[6]).toContain("sinopac_cookie=api-cookie-6");
     expect(JSON.parse(result.cursor ?? "{}")).toMatchObject({
       sessionCookies: authCookies,
       protocol: "sinopac-mobile-app-json-v1",
@@ -895,6 +1016,7 @@ describe("sinopac App JSON parser", () => {
     });
 
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      "https://m.sinopac.com/ws/bank/bankbal/ws_bankbal.ashx",
       "https://m.sinopac.com/ws/card/cardqry/ws_cardsum.ashx",
       "https://m.sinopac.com/ws/card/cardqry/ws_cardbilling_sp.ashx?TxDate=default&TxType=01",
       "https://m.sinopac.com/ws/card/cardqry/ws_cardbilling_sp.ashx?TxDate=202605&TxType=01",

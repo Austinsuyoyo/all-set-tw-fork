@@ -82,6 +82,13 @@ import { cathaybkConfigSchema } from "./cathaybk";
 export { sinopacConfigSchema, parseSinopacConfig } from "./sinopac";
 export type { SinopacConfig } from "./sinopac";
 import { sinopacConfigSchema } from "./sinopac";
+export {
+  fetchSinopacDeposits,
+  isSinopacDepositEmptyTransactions,
+  parseSinopacDepositAccounts,
+  parseSinopacDepositTransactions,
+  SinopacDepositProtocolError,
+} from "./sinopac-deposits";
 
 export { isNoCreditCardMessage } from "./credit-card-status";
 
