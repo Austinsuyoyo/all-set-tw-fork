@@ -198,7 +198,7 @@ workflow 會：
 
 ## 組建版本資訊
 
-「關於」頁面顯示 `TedLin1993/all-set-tw` 的上游 Commit、追蹤分支 `main` 與本次部署的 UTC 組建時間，並可一次複製診斷資訊。
+「關於」頁面顯示 `TedLin1993/all-set-tw` 的上游 Commit、追蹤分支 `main` 與本次部署的台灣組建時間（`Asia/Taipei`，UTC+8），並可一次複製診斷資訊。
 `scripts/build-info.mjs` 在 Vite 組建時辨識採用的上游版本，再由 `apps/web/vite.config.ts` 寫入前端產物。
 
 - 官方 repository 的 checkout 使用 `HEAD` 作為上游 Commit。
