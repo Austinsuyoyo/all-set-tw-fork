@@ -217,6 +217,8 @@ Cloudflare Worker 與 HTTP 平台層，目前包含：
 - Cloudflare Access JWT 驗證。
 - 設定與加密工具。
 
+連接器設定、推播訂閱與集保同步狀態的加密金鑰統一由 `platform/config.ts` 的 `configEncryptionKey` 取得。`CONFIG_ENCRYPTION_KEY=auto` 使用部署 script 保存的 `GENERATED_CONFIG_ENCRYPTION_KEY`，其餘值沿用自訂金鑰；缺少必要的金鑰時直接失敗，詳細初始化與復原限制見[部署文件](005-deployment.md#1-選擇加密金鑰)。
+
 `platform` 不得依賴任何具體 feature。
 
 ### `apps/worker/src/middleware/`
