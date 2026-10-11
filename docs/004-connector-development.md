@@ -464,6 +464,27 @@ OTP 通過後，國泰可能先顯示「密碼已超過半年未更新」提醒�
 
 ### 中國信託銀行
 
+連接器的 `appVer` 使用 `5.2.26`；2026-10-10 核對
+[Google Play 台灣版](https://play.google.com/store/apps/details?id=com.chinatrust.mobilebank&hl=zh_TW&gl=TW)
+與 [App Store 台灣版](https://apps.apple.com/tw/app/id417698185) 的公開最新版均為此版本。
+`webVer` 維持已確認 App 協定中的 `20260722182433427`，不以商店更新日期代替。
+
+登入的 `ctbc_mobile_resource_failed` 與 `ctbc_login_verification_required` 事件提供下列去識別診斷：
+
+| 欄位                | 意義                                                                                                         |
+| ------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `httpStatus`        | 銀行 API 實際 HTTP status，與本專案 `/ctbc/sync` 回傳的 `502` 分開。                                         |
+| `loginAttempt`      | 本次同步的登入請求次數，從 1 開始，包含裝置或重複登入確認。                                                  |
+| `confirmationType`  | 目前請求為 `initial`、`device` 或 `duplicate`。                                                              |
+| `appVer`、`webVer`  | 連接器實際送出的公開版本欄位。                                                                               |
+| `statusCodeType`    | 區分 `missing`、`null` 與欄位型別；既有 `statusCode: ""` 可能來自缺少欄位、`null` 或空字串。                 |
+| `descCategory`      | `app_update_prompt` 表示描述含「更新至最新版本」，其他非空文字為 `other`，缺少文字為 `missing`；不記錄原文。 |
+| `hasRsData`         | 回應是否包含可讀取的 `rsData` 物件。                                                                         |
+| `verificationFlags` | 只記錄裝置／重複登入確認、裝置綁定、OTP、二階段及既有驗證判定的固定布林欄位，不記錄任意回應欄位名稱或值。    |
+
+診斷不包含帳密、帳號、cookie、token、OTP、原始 HTML 或確認時間戳。
+`SVC/0131` 與更新提示分類只能描述回應訊號，不代表已確認根因；原有錯誤分類與登入確認流程維持不變。
+
 信用卡帳單端點 `/twrbm-card/qu002/010` 的 `cardDataList` 明確為空陣列且 `billData` 為空物件，或其 `message` 明確回覆無卡時，保留存款與交易，略過信用卡摘要、未出帳與即時消費查詢。缺少欄位不觸發此判斷；需要驗證的回應優先保留原分類。無卡文案只用於此端點，不把 `8888` 或 `ESB/9201` 直接解讀為無卡，登入後仍執行登出。
 
 中信帳單的消費日、入帳日、結帳日及繳款期限使用 `MMDDYY`；未出帳明細使用
