@@ -371,6 +371,13 @@ OTP 通過後，國泰可能先顯示「密碼已超過半年未更新」提醒�
 「剩餘應繳金額未取得」，相關負債合計顯示「資料不完整」。繳款狀態以銀行已入帳資料為準，
 官方頁面說明付款後約需 1 至 3 個營業日入帳。
 
+#### 貸款帳戶與應繳資訊
+
+- 依序 POST `/ws/bank/loan/ws_loanaccount.ashx` 列出帳戶、對每筆帳戶 POST `ws_loaninfo.ashx` 讀取貸款欄位，再 POST `ws_paydetail.ashx` 讀取計息／繳息資訊。HTTP 2xx、有效 JSON 與 `Header=SUCCESS` 等回應驗證通過後，處理已收到的有效 `SubInfo` 列；若回應提供 `RecordCount`，必須等於末列索引（`SubInfo.length - 1`，空清單為 0），明確筆數不符或存在無效列要計為清單錯誤，但仍保留並處理其他有效列。此貸款清單端點可能不提供 `RecordCount`；缺失／為 null 是完整性未知，不是 API 或解析錯誤，成功的有效空清單也照一般無貸款結果處理。完整性未知的清單不可用來停用或刪除舊貸款；完整性未知本身不增加 failure count，也不把總匯標成 partial。最終摘要依實際清單、單筆貸款及應繳 API／解析錯誤區分成功、無貸款、部分及失敗。`ws_loaninfo` 請求使用 `AcctValue`、`AcctValueFormat`；`ws_paydetail` 的 `LNMAINACNO` 對應 `AcctValue`、`LNALTNO` 對應 `Sub1_Sub2`，其餘貸款參數取自該筆貸款資料。
+- `LoanKind` 依房屋貸款／信用貸款／其他映射為 `housing`／`personal`／`other`；`BeginLoanDate` 映射至 `opened_date`，`LoanBalance` 以負值保存，`Currency` 同時用於帳戶與餘額，`LoanRate` 為頁面以百分比顯示的數值百分點，保存時不再乘除 100。
+- `ws_paydetail.TopInfo` 摘要中的明確「應繳金額」標籤後總計值映射至共用 `loan_payment_amount`；標籤或金額無法唯一解析時留空，並由 persistence 保留既有非空值。`HeadInfo` 的 `DataValue3`（「計息起日／計息止日」）第二個日期映射至共用 `payment_due_date`；`HeadInfo` 的 `DataValue5` 是另一個「繳息金額」，`HeadInfo_2` 的 `DataValue6` 是「現有本金餘額」，兩者保留於 raw，不與總應繳額混用，也不建立繳款交易歷史。
+- 貸款清單、單筆貸款資料或應繳 API 失敗只略過無法確認的貸款欄位／帳戶，仍繼續其他貸款、存款與信用卡同步；單欄缺值不以 NULL 覆蓋舊的非空欄位。`Currency` 無法解析時仍保留其他可解析欄位、幣別留空且不建立本次餘額快照，既有幣別與快照不被覆寫。永豐貸款清單不完整時不停用或刪除既有貸款；本 connector 不依賴空清單清除資料。
+
 #### 授權與明細配對
 
 永豐信用卡取得 `LatestTx.Items` 與 `OutstandingDetail.Detail` 後，在 `bank_transactions`
