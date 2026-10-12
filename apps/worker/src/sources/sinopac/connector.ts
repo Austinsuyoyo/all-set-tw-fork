@@ -27,6 +27,9 @@ import {
 import { fetchSinopacLoans, type SinopacLoanSyncResult } from "./loan-protocol";
 import { isNoCreditCardMessage } from "../credit-card-status";
 import { type SinopacConfig } from "./protocol";
+import { SinopacVerificationRequiredError } from "./verification-error";
+
+export { SinopacVerificationRequiredError } from "./verification-error";
 
 const MOBILE_HOST = "https://m.sinopac.com";
 const LOGIN_URL = `${MOBILE_HOST}/m/member/login/m_login.aspx`;
@@ -76,13 +79,6 @@ type Scraped = {
   bankTransactions: Array<Omit<BankTransaction, "id" | "connectorId">>;
   creditCardBills: Array<Omit<CreditCardBill, "id" | "connectorId">>;
 };
-
-export class SinopacVerificationRequiredError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "SinopacVerificationRequiredError";
-  }
-}
 
 export class SinopacCaptchaRejectedError extends SinopacVerificationRequiredError {
   constructor(message: string) {
@@ -209,7 +205,8 @@ export function createSinopacConnector(
 
       try {
         loans = await client.fetchLoans(now);
-      } catch {
+      } catch (error) {
+        if (error instanceof SinopacVerificationRequiredError) throw error;
         loans = {
           bankAccounts: [],
           bankBalanceSnapshots: [],

@@ -1,6 +1,7 @@
 import forge from "node-forge";
 import { z } from "zod";
 import type { BankAccount, BankBalanceSnapshot } from "@taiwan-fin-hub/shared";
+import { SinopacVerificationRequiredError } from "./verification-error";
 
 type SinopacLoanAccount = Omit<BankAccount, "id" | "connectorId">;
 type SinopacLoanSnapshot = Omit<BankBalanceSnapshot, "id" | "connectorId">;
@@ -462,7 +463,8 @@ export async function fetchSinopacLoans(
       "貸款帳戶清單",
       new URLSearchParams(),
     );
-  } catch {
+  } catch (error) {
+    if (error instanceof SinopacVerificationRequiredError) throw error;
     result.accountListFailures = 1;
     return result;
   }
@@ -483,7 +485,8 @@ export async function fetchSinopacLoans(
           AcctValueFormat: account.acctValueFormat,
         }),
       );
-    } catch {
+    } catch (error) {
+      if (error instanceof SinopacVerificationRequiredError) throw error;
       result.accountDetailFailures += 1;
       result.loanOverviewComplete = false;
       continue;
@@ -518,7 +521,8 @@ export async function fetchSinopacLoans(
         result.paymentDetailFailures += 1;
         result.loanOverviewComplete = false;
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof SinopacVerificationRequiredError) throw error;
       result.paymentDetailFailures += 1;
       result.loanOverviewComplete = false;
     }

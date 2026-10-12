@@ -4,6 +4,7 @@ import {
   parseSinopacLoanAccountList,
   parseSinopacLoanInfo,
 } from "../../../src/sources/sinopac/loan-protocol";
+import { SinopacVerificationRequiredError } from "../../../src/sources/sinopac/verification-error";
 
 // Synthetic only: the captured loan-list HAR omits RecordCount.
 const accountList = (numbers: string[]) => [
@@ -400,6 +401,29 @@ describe("Sinopac loan protocol", () => {
     expect(result.accountListFailures).toBe(1);
     expect(result.loanOverviewComplete).toBe(false);
   });
+
+  it.each([
+    ["account-list", listPath],
+    ["loan-info", infoPath],
+    ["payment-detail", payPath],
+  ] as const)(
+    "rethrows verification-required errors from %s requests",
+    async (_stage, failedPath) => {
+      const verificationError = new SinopacVerificationRequiredError(
+        "synthetic verification required",
+      );
+
+      await expect(
+        fetchSinopacLoans(async (path) => {
+          if (path === failedPath) throw verificationError;
+          if (path === listPath) return accountList(["1234567890123456"]);
+          if (path === infoPath) return loanInfo();
+          if (path === payPath) return payDetail();
+          throw new Error("unexpected endpoint");
+        }),
+      ).rejects.toBe(verificationError);
+    },
+  );
 
   it("accepts an explicitly counted successful empty loan list", async () => {
     const result = await fetchSinopacLoans(async () => success());

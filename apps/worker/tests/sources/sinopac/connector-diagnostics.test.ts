@@ -47,4 +47,59 @@ describe("永豐 connector 安全錯誤處理", () => {
       warning.mockRestore();
     }
   });
+
+  it("在貸款 fetch 階段重新拋出驗證錯誤，不把已取回資料當成成功同步", async () => {
+    const paths: string[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname;
+      paths.push(path);
+      if (path === "/ws/bank/bankbal/ws_bankbal.ashx") {
+        return new Response(
+          JSON.stringify([{ Header: "SUCCESS", RecordCount: 0, SubInfo: [] }]),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      if (path === "/ws/card/cardqry/ws_cardsum.ashx") {
+        return new Response(
+          JSON.stringify([
+            {
+              Header: "SUCCESS",
+              Message: "尚未持有本行信用卡",
+              SubInfo: [],
+            },
+          ]),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      if (path === "/ws/bank/loan/ws_loanaccount.ashx") {
+        return new Response("<html><body>m_login</body></html>", {
+          headers: { "content-type": "text/html; charset=utf-8" },
+        });
+      }
+      throw new Error("unexpected synthetic endpoint");
+    });
+    const config = parseSinopacConfig({
+      userId: "SYNTHETIC_USER_ID",
+      account: "SYNTHETIC_ACCOUNT",
+      password: "SYNTHETIC_PASSWORD",
+      sessionCookies: JSON.stringify([
+        {
+          name: "SESSION",
+          value: "SYNTHETIC_COOKIE",
+          domain: "m.sinopac.com",
+          expires: -1,
+        },
+      ]),
+      protocol: SINOPAC_SESSION_PROTOCOL,
+    });
+
+    await expect(
+      createSinopacConnector(undefined, fetchImpl).sync(config),
+    ).rejects.toBeInstanceOf(SinopacVerificationRequiredError);
+    expect(paths).toEqual([
+      "/ws/bank/bankbal/ws_bankbal.ashx",
+      "/ws/card/cardqry/ws_cardsum.ashx",
+      "/ws/bank/loan/ws_loanaccount.ashx",
+    ]);
+  });
 });
