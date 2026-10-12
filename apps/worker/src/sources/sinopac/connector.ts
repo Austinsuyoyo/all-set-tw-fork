@@ -169,7 +169,7 @@ export function createSinopacConnector(
               "永豐登入工作階段沒有可用頁面，請重新取得圖形驗證碼。",
             );
           }
-            await submitLogin(page, config.captcha);
+          await submitLogin(page, config.captcha);
           sessionCookies = JSON.stringify(await page.cookies());
           verifiedThisRun = true;
         } finally {
@@ -395,7 +395,7 @@ class SinopacAppClient {
       isSinopacDepositEmptyTransactions(payload)
     )
       return payload;
-      assertSinopacApiSuccess(payload, label, creditCardStage);
+    assertSinopacApiSuccess(payload, label, creditCardStage);
     if (
       creditCardStage &&
       flattenRecords(payload).some((record) =>
@@ -469,7 +469,7 @@ class SinopacAppClient {
     ) {
       return undefined;
     }
-      assertSinoCardApiSuccess(payload, label);
+    assertSinoCardApiSuccess(payload, label);
     return payload;
   }
 }
