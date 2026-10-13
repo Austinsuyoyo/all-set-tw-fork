@@ -16,6 +16,7 @@
   } from "@lucide/svelte";
   import BrowserBankConnectionHelp from "./BrowserBankConnectionHelp.svelte";
   import ConnectionProgress from "./ConnectionProgress.svelte";
+  import CtbcVerification from "./CtbcVerification.svelte";
   import Card from "@/shared/ui/Card.svelte";
   import Button from "@/shared/ui/Button.svelte";
   import Input from "@/shared/ui/Input.svelte";
@@ -73,6 +74,7 @@
   let focusedCredentialKeys = $state<Record<string, boolean>>({});
   let error = $state("");
   let otp = $state("");
+  let ctbcVerificationBusy = $state(false);
   let tdccSetupStep = $state<"credentials" | "email" | "sms" | "complete">(
     "credentials",
   );
@@ -193,7 +195,9 @@
           cathayVerificationExpiresAt = null;
           cathayVerificationSecondsRemaining = null;
         } else if (result.data.verificationPending) {
-          cathayOtpChannel = result.data.verificationChannel ?? null;
+          const channel = result.data.verificationChannel;
+          cathayOtpChannel =
+            channel === "email" || channel === "sms" ? channel : null;
           cathayVerificationStep = cathayOtpChannel ?? "choose";
           cathayVerificationExpiresAt =
             result.data.verificationExpiresAt ?? null;
@@ -287,7 +291,7 @@
       const runSync = () =>
         connectorId === "einvoice" || connectorId === "tdcc"
           ? api.post<QueuedSyncResponse>(path, {})
-          : api.post(path);
+          : api.post(path, connectorId === "ctbc" ? {} : undefined);
       try {
         return await runSync();
       } catch (errorValue) {
@@ -303,6 +307,10 @@
     },
     onSuccess: (_data, _target, context) => {
       error = "";
+      if (connectorId === "ctbc")
+        qc.invalidateQueries({
+          queryKey: queryKeys.connectorSettings(connectorId),
+        });
       if (connectorId === "nextbank") bankOperation = "success";
       if (connectorId === "cathaybk") {
         resetCathayVerification();
@@ -331,6 +339,19 @@
       }
       if (handleTdccVerificationRequired(e)) return;
       if (handleCathayVerificationRequired(e)) return;
+      if (connectorId === "ctbc") {
+        qc.invalidateQueries({
+          queryKey: queryKeys.connectorSettings(connectorId),
+        });
+        if (
+          e instanceof ApiRequestError &&
+          (e.code === "CTBC_APP_APPROVAL_REQUIRED" ||
+            e.code === "CTBC_EMAIL_OTP_REQUIRED")
+        ) {
+          error = "";
+          return;
+        }
+      }
       if (connectorId === "megabank" && isMegabankOtpRequired(e)) {
         enterMegabankOtp(
           e instanceof Error
@@ -1081,6 +1102,9 @@
           size="sm"
           disabled={demoMode ||
             $sync.isPending ||
+            (connectorId === "ctbc" &&
+              (ctbcVerificationBusy ||
+                Boolean($settings.data?.verificationExpiresAt))) ||
             (connectorId === "einvoice" && einvoiceSyncPolling !== null) ||
             (connectorId === "cathaybk" &&
               !cathayVerificationExpired &&
@@ -1111,6 +1135,22 @@
     >
       Demo site 已停用同步；你仍可查看示範資料與介面互動。
     </p>{/if}
+  {#if connectorId === "ctbc"}
+    {#key $settings.data?.updatedAt}
+      <CtbcVerification
+        {api}
+        pending={$settings.data?.verificationPending}
+        channel={$settings.data?.verificationChannel}
+        expiresAt={$settings.data?.verificationExpiresAt}
+        disabled={demoMode || syncBusy || $sync.isPending || $save.isPending}
+        bind:busy={ctbcVerificationBusy}
+        onSuccess={() => {
+          error = "";
+          refreshAfterManualSync(false);
+        }}
+      />
+    {/key}
+  {/if}
   {#if connectorId === "tdcc"}
     <ConnectionProgress
       step={tdccSetupStep}
@@ -1875,8 +1915,10 @@
                   ? "首次驗證會加入信任裝置；信任失效時需在手動同步中重新取得驗證碼。"
                   : connectorId === "megabank"
                     ? "兆豐同步直接使用 App API，以一般帳密登入並辨識五位數圖形驗證碼；也可改用人工輸入。"
-                    : connectorId === "rakuten"
-                      ? "樂天網銀驗證碼會先以 Workers AI 自動辨識，失敗時改由人工輸入；每次同步都重新登入，結束時登出，不保留 session。"
-                      : "輸入完帳號密碼後，請先按「儲存設定」，再按「同步」。"}
+                    : connectorId === "ctbc"
+                      ? "中信 App 核准只適用於當次登入，目前尚未支援網銀的信任瀏覽器功能。需要兩階段驗證時請在此完成；銀行仍可能要求再次核准或換密碼。"
+                      : connectorId === "rakuten"
+                        ? "樂天網銀驗證碼會先以 Workers AI 自動辨識，失敗時改由人工輸入；每次同步都重新登入，結束時登出，不保留 session。"
+                        : "輸入完帳號密碼後，請先按「儲存設定」，再按「同步」。"}
   </p>
 </Card>

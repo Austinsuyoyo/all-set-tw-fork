@@ -477,23 +477,97 @@ OTP 通過後，國泰可能先顯示「密碼已超過半年未更新」提醒�
 連接器的 `appVer` 使用 `5.2.26`；2026-10-10 核對
 [Google Play 台灣版](https://play.google.com/store/apps/details?id=com.chinatrust.mobilebank&hl=zh_TW&gl=TW)
 與 [App Store 台灣版](https://apps.apple.com/tw/app/id417698185) 的公開最新版均為此版本。
-`webVer` 維持已確認 App 協定中的 `20260722182433427`，不以商店更新日期代替。
+2026-10-11 靜態核對 [APKMirror 公開分發的 Android 套件](https://www.apkmirror.com/apk/ctbc-bank/china-trust-action-bank/)
+`5.2.26`（build `2026081201`）：`webVer` 使用 `UtilsService.getWebVersion()` 回傳的
+`(0812)`，不以商店更新日期或推測的時間戳代替。
+
+新版 OT044 登入仍使用 `/twrbm-general/ot001/010`，但 `rqData` 除既有欄位外，
+必須傳入 `version: "5.2.26"`、`twoStageVerify: true`、`userAgent` 與
+`checkDeviceShare: "Y"`；envelope 的 `appVer` 不能代替登入資料中的 `version`。
+`userAgent` 與 HTTP `User-Agent` 使用符合連接器既有 Android 裝置資訊的 WebView 值。
+
+首次同步在任何銀行請求前產生並以設定版本 CAS 保存 `deviceCode` UUID，
+之後初始化、HTTP header 與 envelope 的 `deviceIxd` 都沿用此識別。
+首次握手後、登入前以相同 CAS 保存銀行發出的 `deviceSeed`，之後握手與所有請求的
+`seed` 皆沿用已保存值，不以新握手或其他回應的 seed 覆蓋。這符合 `5.2.26` 公開套件
+`main` 的啟動流程：握手前還原本機 seed，只有本機沒有 seed 時才保存 `rsData.seed`。
+保留 seed 可沿用原行銀識別，但不會替未綁定的連接器取得正式 App 的設備認證。
+舊版待核准登入已有 seed 時，接續前搬入 `deviceSeed`，保留這次核准所使用的識別。
+初始化、登入或驗證失敗也保留裝置識別與 seed；修改密碼只清除 `pendingSession`，
+修改身分證字號或使用者代號才清除兩者，下一次同步重新產生。
+兩者只保存於 `encrypted_config`，不是有效登入 session 或正式 App 的設備認證綁定。
+官方 App `5.2.26` 的 AG034 說明：行銀除已綁定設備之外皆為陌生裝置；
+App 核准只完成當次登入。網銀另有「信任此瀏覽器」，最多五台，核准起半年失效。
+目前連接器未執行手機設備綁定，也未完成網銀信任登記；保存 seed 不代表下次免核准。
+
+2026-10-13 探索[官方網銀公開程式](https://www.ctbcbank.com/main.c4908447ba00d3be.js)
+`5.01.18` 的信任登記流程：銀行回傳 `twoStageVerifyRmChkEnable: true` 時，核准後向
+`/twrbc-general/ot001/010` 傳入 `twoStageVerifyRememberBrowser: true`，並跨同步保存瀏覽器 seed。
+但直接 HTTP 在初始化階段收到 `202` 的 HTML 安全檢查頁，本機 Puppeteer 亦未載入登入表單，
+Cloudflare Browser Run 的表單等待則逾時。診斷用初始化請求未送出使用者帳密；
+目前主流程維持已可接續 App 核准的行銀 API，網銀實驗未啟用。
+
+`twoStageVerify` 宣告新版登入能力，不代表已完成驗證。回應包含
+`isTwoStageLogin: true` 時，保存這次登入的 OAuth／驗證 token、seed、clientNo、
+原始加密登入資料、驗證方式與期限，全部置於 `encrypted_config.pendingSession`。
+每次暫存依銀行 `twoStageCountDownSec` 計算期限，最多五分鐘；不保存 OTP、
+Email、Email 驗證識別或完整銀行回應，也不放入 `sync_cursor`、公開設定、錯誤或日誌。
+設定 API 只提供驗證中狀態、App／Email 方式及到期時間。
+
+手動同步接續同一登入，不重新 bootstrap 或產生加密 PIN：
+
+- App：使用者在已綁定 App 核准後，按「我已確認，繼續同步」才呼叫
+  `/twrbm-general/ot001/002`。`keepListen: true` 保留等待狀態；
+  `keepListen: false` 且 `twoStageVerifySuccess: true` 才接續，沒有背景輪詢。
+- Email：使用者按「改用 Email 驗證」才呼叫 `/ot001/003`，傳入 `genType: "2"`；
+  回應的 Email 與驗證識別皆非空才切換方式。同一 Email challenge 不重送寄信。
+  已由登入回應進入 Email 分支時直接顯示輸入框。
+  四位數字 OTP 送至 `/ot001/004` 的 `twoStageVerifyEmailAuthCode`，銀行明確回覆成功才接續。
+- 核准或 OTP 成功後，沿用原始加密登入資料向 `/ot001/010` 傳入
+  `loginType: "TWO_STAGE_VERIFY"`。未完成驗證前不查帳；過期、拒絕或其他失敗清除暫存，
+  由使用者明確重新開始。成功登入清除暫存，查詢結束仍登出，不跨次重用登入 session。
+
+`verifyData.verify` 為 `11`（Email 聯絡方式驗證）或 `21`（手機聯絡方式驗證）、
+非空 `verifySharedDeviceTimestamp` 或 `deviceBindBlackListCheckTimestamp` 時停止並提示使用官方 App；
+後兩者的確認可能解除其他裝置綁定，不自動送出。只有沒有待驗證或換密碼訊號時，
+才送出重複登入時間戳確認，初次登入與 App／Email 驗證後的接續共用此處理。
+驗證後的確認仍使用 `TWO_STAGE_VERIFY`、原加密 PIN 與同一工作階段。
+`forcePwdChange` 非 null 時停止查帳，提示至官方 App 變更密碼並更新設定；
+已成功登入的工作階段會登出。這些狀態皆標記 `needs_user_action`，暫停排程直到手動同步成功。
+
+中信自動同步沿用預設或自訂排程頻率，不另設每日次數限制。
+正式環境與遠端開發由 Worker 直接連線 `https://eb.ctbcbank.com/IMP/`；
+本機 `npm run dev` 保留既有 loopback Node TLS relay。
+裝置識別與驗證暫存只保存於 D1 加密設定。銀行以「未綁定裝置」判定是否要求兩階段驗證，
+與連線機房無關，因此不另以 Durable Object 集中對外連線；
+位置提示也無法指定台灣機房或固定出口 IP。
+免費 Cloudflare 無法保證固定台灣出口 IP；
+[dedicated egress IPs](https://developers.cloudflare.com/cloudflare-one/traffic-policies/egress-policies/dedicated-egress-ips/)
+屬 Zero Trust Enterprise 加購服務。固定裝置識別仍
+不能保證免驗證、免強制換密碼，或宣稱已完成銀行端信任裝置登記。
 
 登入的 `ctbc_mobile_resource_failed` 與 `ctbc_login_verification_required` 事件提供下列去識別診斷：
 
-| 欄位                | 意義                                                                                                         |
-| ------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `httpStatus`        | 銀行 API 實際 HTTP status，與本專案 `/ctbc/sync` 回傳的 `502` 分開。                                         |
-| `loginAttempt`      | 本次同步的登入請求次數，從 1 開始，包含裝置或重複登入確認。                                                  |
-| `confirmationType`  | 目前請求為 `initial`、`device` 或 `duplicate`。                                                              |
-| `appVer`、`webVer`  | 連接器實際送出的公開版本欄位。                                                                               |
-| `statusCodeType`    | 區分 `missing`、`null` 與欄位型別；既有 `statusCode: ""` 可能來自缺少欄位、`null` 或空字串。                 |
-| `descCategory`      | `app_update_prompt` 表示描述含「更新至最新版本」，其他非空文字為 `other`，缺少文字為 `missing`；不記錄原文。 |
-| `hasRsData`         | 回應是否包含可讀取的 `rsData` 物件。                                                                         |
-| `verificationFlags` | 只記錄裝置／重複登入確認、裝置綁定、OTP、二階段及既有驗證判定的固定布林欄位，不記錄任意回應欄位名稱或值。    |
+| 欄位                | 意義                                                                                                                              |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `httpStatus`        | 銀行 API 實際 HTTP status，與本專案 `/ctbc/sync` 回傳的 `502` 分開。                                                              |
+| `loginAttempt`      | 本次同步的登入請求次數，從 1 開始，包含重複登入確認或兩階段驗證後的登入接續。                                                     |
+| `confirmationType`  | 目前請求為 `initial` 或 `duplicate`。                                                                                             |
+| `appVer`、`webVer`  | 連接器實際送出的公開版本欄位。                                                                                                    |
+| `statusCodeType`    | 區分 `missing`、`null` 與欄位型別；既有 `statusCode: ""` 可能來自缺少欄位、`null` 或空字串。                                      |
+| `descCategory`      | `app_update_prompt` 表示描述含「更新至最新版本」，其他非空文字為 `other`，缺少文字為 `missing`；不記錄原文。                      |
+| `hasRsData`         | 回應是否包含可讀取的 `rsData` 物件。                                                                                              |
+| `verificationFlags` | 只記錄裝置／重複登入／共享裝置確認、聯絡方式驗證、裝置綁定、OTP、兩階段及既有驗證判定的固定布林欄位，不記錄任意回應欄位名稱或值。 |
 
 診斷不包含帳密、帳號、cookie、token、OTP、原始 HTML 或確認時間戳。
-`SVC/0131` 與更新提示分類只能描述回應訊號，不代表已確認根因；原有錯誤分類與登入確認流程維持不變。
+`sharedDeviceConfirmation` 與 `contactVerification` 是新增的固定布林欄位；
+`twoStage` 同時辨識官方的 `isTwoStageLogin`。
+`SVC/0131` 與更新提示分類只能描述回應訊號，不代表已確認根因；
+套件協定核對、合成回應、隔離 D1 與前端模擬 API 測試不代表已取得銀行端信任。
+本機真實帳號已確認 App 核准後可成功同步，但第二次仍要求核准；行銀握手回傳空 seed，
+因此不能以保存 seed 的測試宣稱已支援一次驗證。Email 與部署環境仍需真實帳號驗收。
+同步寫入在同一 D1 promotion batch 核對登入使用的設定版本；
+期間帳密已更新時回滾金融資料、授權合併與 cursor，不覆蓋新憑證或回報成功。
 
 信用卡帳單端點 `/twrbm-card/qu002/010` 的 `cardDataList` 明確為空陣列且 `billData` 為空物件，或其 `message` 明確回覆無卡時，保留存款與交易，略過信用卡摘要、未出帳與即時消費查詢。缺少欄位不觸發此判斷；需要驗證的回應優先保留原分類。無卡文案只用於此端點，不把 `8888` 或 `ESB/9201` 直接解讀為無卡，登入後仍執行登出。
 
