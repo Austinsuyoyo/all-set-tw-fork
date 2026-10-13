@@ -287,6 +287,44 @@ describe("背景手動同步（隔離 D1）", () => {
     });
   });
 
+  it("放回佇列後、釋放自己的 lock 前，重送訊息不會取消此 run", async () => {
+    mocks.runConnectorSync.mockResolvedValue(outcome);
+    const requeued = await startQueuedManualSync(env, "esun");
+    const ownLock = {
+      lockRowId: "esun:all",
+      scope: "all",
+      trigger: "manual" as const,
+      runId: requeued.run.id,
+      leaseMs: 60_000,
+    };
+    expect(await acquireSyncJobLock(env.DB, ownLock)).toBe(true);
+
+    expect(await processQueuedManualSync(env, requeued.run.id)).toEqual({
+      status: "done",
+    });
+    expect(await getManualSyncRun(env.DB, requeued.run.id)).toMatchObject({
+      status: "queued",
+    });
+
+    await harness.binding
+      .prepare("UPDATE manual_sync_runs SET created_at = ? WHERE id = ?")
+      .bind(new Date(Date.now() - 31 * 60_000).toISOString(), requeued.run.id)
+      .run();
+    await processQueuedManualSync(env, requeued.run.id);
+    await recoverStalledSyncRuns(env);
+    expect(await getManualSyncRun(env.DB, requeued.run.id)).toMatchObject({
+      status: "queued",
+    });
+    expect(mocks.runConnectorSync).not.toHaveBeenCalled();
+
+    await releaseSyncJobLock(env.DB, ownLock.lockRowId, ownLock.runId);
+    await processQueuedManualSync(env, requeued.run.id);
+    expect(await getManualSyncRun(env.DB, requeued.run.id)).toMatchObject({
+      status: "failed",
+      errorCode: "SYNC_QUEUE_TIMEOUT",
+    });
+  });
+
   it("容量等待超過剩餘排隊時間時直接失敗，不重新排隊", async () => {
     mocks.runConnectorSync.mockRejectedValue(
       new BrowserRunCapacityError("daily_quota", 12 * 60 * 60),

@@ -719,6 +719,7 @@ Queue consumer 以 run ID 作為 owner 取得 canonical connector lock，取得�
 結案為 `needs_user_action` 時保存錯誤代碼供使用者回來處理。
 
 只有 Browser Run 容量不足（登入前），且等待時間仍在 30 分鐘排隊上限內，才會放回 queue，最多三次，且不記錄為 sync job 失敗；每日額度這類更長的等待直接以容量錯誤結案。
+放回 queued 到釋放自己 lock 之間，重送訊息與排隊逾時清理都不會結案此 run，交由替代訊息接續。
 其他錯誤一律結案，不自動重試銀行登入。結果與 sync job 狀態、報告修復沿用一般手動同步；
 釋放 connector lock 後依推播偏好送出結果通知（`trigger = manual`）。
 

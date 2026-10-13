@@ -220,7 +220,10 @@ export async function finishManualSyncRun(
   return result.meta.changes === 1;
 }
 
-/** 尚未開始的 run 結案；用於排隊逾時、enqueue 失敗或來源已被其他同步占用。 */
+/**
+ * 尚未開始的 run 結案；用於排隊逾時、enqueue 失敗或來源已被其他同步占用。
+ * 容量重試放回 queued 後、釋放自己的 lock 前，重送訊息不得結案此 run。
+ */
 export async function closeQueuedManualSyncRun(
   db: D1Database,
   id: string,
@@ -234,7 +237,13 @@ export async function closeQueuedManualSyncRun(
   const result = await createDrizzle(db)
     .update(manualSyncRuns)
     .set({ ...input, completedAt: now, updatedAt: now })
-    .where(and(eq(manualSyncRuns.id, id), eq(manualSyncRuns.status, "queued")))
+    .where(
+      and(
+        eq(manualSyncRuns.id, id),
+        eq(manualSyncRuns.status, "queued"),
+        sql`NOT ${holdsConnectorLock(now)}`,
+      ),
+    )
     .run()
     .catch(rethrow);
   return result.meta.changes === 1;
@@ -258,6 +267,7 @@ export async function expireQueuedManualSyncRuns(
       and(
         eq(manualSyncRuns.status, "queued"),
         lte(manualSyncRuns.createdAt, input.createdBefore),
+        sql`NOT ${holdsConnectorLock(now)}`,
       ),
     )
     .run()
