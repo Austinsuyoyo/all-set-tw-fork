@@ -287,6 +287,25 @@ describe("背景手動同步（隔離 D1）", () => {
     });
   });
 
+  it("容量等待超過剩餘排隊時間時直接失敗，不重新排隊", async () => {
+    mocks.runConnectorSync.mockRejectedValue(
+      new BrowserRunCapacityError("daily_quota", 12 * 60 * 60),
+    );
+    const exhausted = await startQueuedManualSync(env, "esun");
+    expect(await processQueuedManualSync(env, exhausted.run.id)).toEqual({
+      status: "done",
+    });
+    expect(await getManualSyncRun(env.DB, exhausted.run.id)).toMatchObject({
+      status: "failed",
+      errorCode: "BROWSER_BUSY",
+      retryCount: 0,
+    });
+    expect(await syncJob()).toMatchObject({
+      last_status: "failed",
+      last_error_code: "BROWSER_BUSY",
+    });
+  });
+
   it("中斷與排隊逾時的 run 由 recovery 結案，之後可以重新排入", async () => {
     const interrupted = await startQueuedManualSync(env, "esun");
     await acquireSyncJobLock(env.DB, {

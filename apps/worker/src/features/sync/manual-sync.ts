@@ -236,9 +236,17 @@ export async function processQueuedManualSync(
     if (!(await claimManualSyncRun(env.DB, run.id))) return { status: "done" };
     const canRetryCapacity =
       run.retryCount + 1 < MANUAL_SYNC_MAX_CAPACITY_RETRIES;
-    const isCapacityRetry = (error: unknown) =>
-      canRetryCapacity &&
-      classifySyncError(error).retryAfterSeconds !== undefined;
+    // 每日額度的等待可達數小時，超過 30 分鐘排隊上限時直接以容量錯誤結案。
+    const queueDeadline =
+      Date.parse(run.createdAt) + MANUAL_SYNC_QUEUE_TIMEOUT_MS;
+    const isCapacityRetry = (error: unknown) => {
+      const retryAfter = classifySyncError(error).retryAfterSeconds;
+      return (
+        canRetryCapacity &&
+        retryAfter !== undefined &&
+        Date.now() + retryAfter * 1_000 < queueDeadline
+      );
+    };
     try {
       await runLockedManualSync(
         env,
