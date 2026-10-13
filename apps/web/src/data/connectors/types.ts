@@ -12,7 +12,7 @@ export interface ConnectorSettings {
   credentialsComplete?: boolean;
   sessionAvailable?: boolean;
   verificationPending?: boolean;
-  verificationChannel?: "email" | "sms" | null;
+  verificationChannel?: "app" | "email" | "sms" | null;
   verificationExpiresAt?: string | null;
 }
 

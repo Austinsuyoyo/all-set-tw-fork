@@ -586,6 +586,14 @@ sources/
 
 Worker 的 `sources/<connectorId>/sync.ts` 負責設定解密、connector 呼叫與同步資料寫入；單次銀行流程也處理互動式 challenge，override 型別與來源 colocate。`ctbc/authorizations.ts` 管信用卡授權合併，`hncb/repository.ts` 管華南舊交易／帳戶修復，`nextbank/deposits.ts` 與 `obank/time-deposits.ts` 管存款生命週期。共用同步管理留在 `features/sync`，來源之間共用的外部取資料工具留在 `sources` 根目錄。
 
+中信的固定裝置識別、銀行發出的裝置 seed 與短期兩階段登入暫存只保存於加密設定。
+`ctbc/sync.ts` 以設定版本 CAS 在初始化前保存裝置 ID、首次握手後登入前保存 seed；
+後續同步在握手前還原同一 seed。手動 App 核准／Email OTP 接回同一工作階段；排程遇到驗證只保存狀態
+並標記 `needs_user_action`，不輪詢或主動寄送 OTP。完成登入清除暫存，查帳後登出。
+保存行銀裝置識別與 seed 不等同設備綁定或網銀信任瀏覽器登記，App 核准僅接續當次登入。
+promotion 的設定版本 guard 與金融資料、授權合併、cursor 在同一 D1 batch；
+登入期間設定變更時整組回滾。公開 API 只顯示驗證狀態、方式與期限，協定及驗收限制見連接器文件。
+
 玉山、台新、永豐、中信、第一銀行、華南與兆豐提供來源的卡片識別後，使用共用 `card-authorization-matching.ts`：同帳戶、同卡、台灣時區同消費日、同幣別同額同方向的群組，依授權時刻與 `sourceId`、明細的 `sourceId` 順序逐一分配，每筆明細只配一次，不比店名。兩側筆數不等時只配可對應的筆數，其餘持續顯示；既有配對與被占用的目標不重新分配。核心可先執行來源提供的雙向唯一可靠識別比對；雙方授權碼明確不同時，禁止金額 fallback。永豐精確配對後仍以來源策略處理外幣／調整金額。
 
 交易只保留 `pending`／`posted`，不新增已出帳狀態；帳單明細沿用原本補抓／更新用途，帳單摘要仍計算負債。`card-authorization-write.ts` 在同一 promotion batch 保存配對、補可靠時刻及移轉使用者設定，目標既有決定優先，發票衝突保留。第一銀行、華南、兆豐直接使用共用 preparation；玉山、台新、永豐與中信維持來源適配與舊 ID 相容。玉山先把即時授權接到未入帳歷史明細，再接正式入帳，依序移轉時刻與設定；中信保留原授權 ID 並完成合併，發票衝突時不刪除交易。來源差異與尚未提供待入帳資料的銀行見連接器文件。

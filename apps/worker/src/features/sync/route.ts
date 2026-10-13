@@ -1,4 +1,9 @@
-import { CtbcConnectionError } from "../../sources/ctbc/mobile-api";
+import {
+  CtbcConnectionError,
+  CtbcTwoStageRequiredError,
+  CtbcVerificationExpiredError,
+  CtbcVerificationRequiredError,
+} from "../../sources/ctbc/mobile-api";
 import { EInvoiceProtocolUnavailableError } from "../../sources/einvoice/api";
 import {
   ObankConnectionError,
@@ -139,6 +144,16 @@ const cathaySyncBodySchema = z.object({
   otpChannel: z.enum(["email", "sms"]).optional(),
 });
 
+const ctbcSyncBodySchema = z
+  .object({
+    verification: z.enum(["check", "email", "restart"]).optional(),
+    otp: z
+      .string()
+      .regex(/^\d{4}$/)
+      .optional(),
+  })
+  .refine((value) => !(value.verification && value.otp));
+
 const megabankSyncBodySchema = z.object({
   captcha: z
     .string()
@@ -274,14 +289,29 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
     },
   );
 
-  api.post("/connectors/ctbc/sync", async (c) => {
-    return syncRouteResponse(
-      c,
-      withManualSyncLock(c.env, "ctbc", SYNC_SCOPE_ALL, (syncEnv) =>
-        runConnectorSync(syncEnv, "ctbc", "manual"),
-      ),
-    );
-  });
+  api.post(
+    "/connectors/ctbc/sync",
+    zValidator(
+      "json",
+      ctbcSyncBodySchema,
+      validationHook("INVALID_REQUEST", "中國信託驗證選項格式錯誤。"),
+    ),
+    async (c) => {
+      const overrides = c.req.valid("json");
+      return syncRouteResponse(
+        c,
+        withManualSyncLock(c.env, "ctbc", SYNC_SCOPE_ALL, (syncEnv) =>
+          runConnectorSync(
+            syncEnv,
+            "ctbc",
+            "manual",
+            SYNC_SCOPE_ALL,
+            overrides,
+          ),
+        ),
+      );
+    },
+  );
 
   api.post("/connectors/skbank/sync", async (c) => {
     return syncRouteResponse(
@@ -811,6 +841,22 @@ async function syncRouteResponse(
     if (error instanceof SyncAlreadyRunningError) {
       return jsonError("SYNC_ALREADY_RUNNING", safeErrorMessage(error), 409);
     }
+    if (error instanceof CtbcTwoStageRequiredError) {
+      return jsonError(
+        error.method === "app"
+          ? "CTBC_APP_APPROVAL_REQUIRED"
+          : "CTBC_EMAIL_OTP_REQUIRED",
+        safeErrorMessage(error),
+        400,
+      );
+    }
+    if (error instanceof CtbcVerificationExpiredError) {
+      return jsonError(
+        "CTBC_VERIFICATION_EXPIRED",
+        safeErrorMessage(error),
+        400,
+      );
+    }
     if (error instanceof BrowserRunCapacityError)
       return browserRunBusyResponse(error);
     if (error instanceof CathayOtpChannelRequiredError) {
@@ -874,7 +920,10 @@ async function syncRouteResponse(
     if (error instanceof MegabankOtpInvalidError) {
       return jsonError("MEGABANK_OTP_INVALID", safeErrorMessage(error), 400);
     }
-    if (error instanceof NeedsUserActionError) {
+    if (
+      error instanceof NeedsUserActionError ||
+      error instanceof CtbcVerificationRequiredError
+    ) {
       return jsonError("USER_ACTION_REQUIRED", safeErrorMessage(error), 400);
     }
     if (error instanceof EInvoiceProtocolUnavailableError) {
