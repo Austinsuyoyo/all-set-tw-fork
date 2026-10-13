@@ -237,6 +237,15 @@ describe("台新信用卡金融數字與資料完整性", () => {
       },
       {
         unbilled: {
+          ...unbilled,
+          value: {
+            ...unbilled.value,
+            showRB0712_SUBTOTAL: "(CRXTIKE004)無消費資料",
+          },
+        },
+      },
+      {
+        unbilled: {
           error: null,
           value: { unpostedTx: { "001TWD": { ErrMsg: "無法取得資料" } } },
         },
@@ -252,6 +261,7 @@ describe("台新信用卡金融數字與資料完整性", () => {
         unbilled: {
           error: null,
           value: {
+            showRB0712_SUBTOTAL: "(CRXTIKE004)無消費資料",
             unpostedTx: { "001TWD": { ErrMsg: "(CRXTIKE004)無消費資料" } },
           },
         },
