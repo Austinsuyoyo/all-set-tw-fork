@@ -131,3 +131,16 @@ Demo 模式與排程資料尚未載入時停用編輯。
 
 `ConnectorPanel` 依 `GET /api/sync-jobs` 的 `running` 與 `phase` 追蹤電子發票／集保 active run，不能只依 connector lock 到期判定完成。API 同時提供 run ID、最近狀態更新時間與最短重試等待秒數；一般同步的狀態時間可能包含 heartbeat，不能當成金融資料更新時間。
 `phase = stalled` 時保留 polling，顯示停滯提示與「重試同步」，補送既有 run 的 continuation；集保保留原 run 的 scope。有效 lease 下的工作仍禁止重複同步，重試排入 Queue 後須等待 lifecycle 完成才顯示成功。
+
+一般銀行不帶輸入的手動同步回傳 202 後在背景執行，離開或重新整理頁面不影響同步。
+`syncJobsQuery` 在任一來源 `running` 時每 3 秒重新查詢，全部閒置即停止。狀態列以一行顯示
+`phase` 對應的階段（排隊中、正在登入、正在取得資料、正在儲存結果）或最近結果，瀏覽器銀行另附登入
+保存狀態；自動同步開關以「開啟／關閉自動同步」按鈕表示。來源執行中
+（含排隊、排程與其他手動同步）時停用該來源的同步與人工驗證按鈕，並顯示「排隊中…」、
+「同步中…」或「排程同步中…」。`ConnectorPanel` 記住本頁送出的背景 run ID，等
+`manualRun` 結案後沿用同步請求的成功／錯誤處理；失敗時以 `manualRun.errorCode` 建立
+`ApiRequestError`，接續人工驗證碼、兆豐簡訊 OTP、國泰／中信驗證與集保 OTP 等既有流程。
+回到頁面時若最近結果為 `needs_user_action` 且 `lastErrorCode` 可接續（人工驗證碼、
+三分鐘內的兆豐 OTP、集保 OTP），顯示「處理」提示。首次同步成功後開啟排程由後端處理，
+前端不另外送出排程更新。帶驗證碼或 OTP 的接續請求仍在 request 內完成；請求被中斷時改以
+輪詢 sync job 判斷結果。集保首次連線排入背景後，等 Queue 初始化結果決定進入 OTP 步驟或完成。

@@ -1,4 +1,5 @@
 import type { SyncResult } from "../types";
+import { reportSyncProgress } from "../sync-progress";
 
 import forge from "node-forge";
 import {
@@ -207,6 +208,7 @@ export function createCtbcConnector(
           await session.bootstrap();
           await session.login(credentials);
         }
+        reportSyncProgress("fetching");
 
         const depositOverview = await session.resource(
           DEPOSIT_OVERVIEW_RESOURCE,
