@@ -22,8 +22,10 @@ for (const method of ["app", "email"] as const) {
       preferredWeekdays: [1],
       lastStatus: null as string | null,
       lastError: null as string | null,
+      lastErrorCode: null as string | null,
       lastRunAt: null as string | null,
       lastSuccessAt: null as string | null,
+      manualRun: null as Record<string, unknown> | null,
     };
     await page.route("**/api/**", async (route) => {
       const path = new URL(route.request().url()).pathname;
@@ -31,6 +33,32 @@ for (const method of ["app", "email"] as const) {
       if (path === "/api/connectors/ctbc/sync") {
         const body = route.request().postDataJSON();
         requests.push(body);
+        if (Object.keys(body).length === 0) {
+          // 一般同步在背景執行；結束時留下需要驗證的錯誤代碼。
+          pending = true;
+          job.lastStatus = "needs_user_action";
+          job.lastError = "需要確認這次登入。";
+          job.lastErrorCode = "CTBC_APP_APPROVAL_REQUIRED";
+          job.lastRunAt = new Date().toISOString();
+          job.manualRun = {
+            id: "manual-run",
+            status: "needs_user_action",
+            errorCode: job.lastErrorCode,
+            lastError: job.lastError,
+            createdAt: job.lastRunAt,
+            completedAt: job.lastRunAt,
+          };
+          return route.fulfill({
+            status: 202,
+            json: {
+              success: true,
+              connectorId: "ctbc",
+              scope: "all",
+              status: "queued",
+              runId: "manual-run",
+            },
+          });
+        }
         if (body.verification === "email") channel = "email";
         if (
           (body.verification === "check" && approved) ||
@@ -152,8 +180,10 @@ test("銀行手動驗證失敗可重試，送出驗證碼後完成同步", async
     preferredWeekdays: [1],
     lastStatus: "failed",
     lastError: "將來銀行 API：transport",
+    lastErrorCode: "TEST_TRANSPORT" as string | null,
     lastRunAt: "2026-09-28T01:05:00Z",
     lastSuccessAt: "2026-09-27T01:05:00Z",
+    manualRun: null as Record<string, unknown> | null,
   };
   let recover = false;
   let syncCalls = 0;
@@ -170,13 +200,27 @@ test("銀行手動驗證失敗可重試，送出驗證碼後完成同步", async
           json: { success: true, records: 1, cursorUpdated: true },
         });
       }
+      // 一般同步在背景執行；自動辨識失敗時以錯誤代碼要求人工驗證碼。
+      job.lastStatus = "needs_user_action";
+      job.lastError = "請重新取得圖片。";
+      job.lastErrorCode = "NEXTBANK_CAPTCHA_REQUIRED";
+      job.lastRunAt = new Date().toISOString();
+      job.manualRun = {
+        id: "manual-run",
+        status: "needs_user_action",
+        errorCode: job.lastErrorCode,
+        lastError: job.lastError,
+        createdAt: job.lastRunAt,
+        completedAt: job.lastRunAt,
+      };
       return route.fulfill({
-        status: 400,
+        status: 202,
         json: {
-          error: {
-            code: "NEXTBANK_CAPTCHA_REQUIRED",
-            message: "請重新取得圖片。",
-          },
+          success: true,
+          connectorId: "nextbank",
+          scope: "all",
+          status: "queued",
+          runId: "manual-run",
         },
       });
     }

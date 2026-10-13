@@ -15,6 +15,7 @@ import puppeteer, {
   type HTTPResponse,
 } from "@cloudflare/puppeteer";
 import { BANK_SYNC_MONTHS } from "../sync-window";
+import { reportSyncProgress } from "../sync-progress";
 import { isNoCreditCardMessage } from "../credit-card-status";
 import {
   parseTaishinCreditCardData,
@@ -314,6 +315,7 @@ export function createTaishinConnector(
           );
         }
         authenticated = true;
+        reportSyncProgress("fetching");
         stage = "dismiss_password_reminder";
         pageContext = await dismissPasswordReminder(page, reusedSessionFrame);
 
@@ -331,8 +333,10 @@ export function createTaishinConnector(
             throw error;
           }
           stage = "login";
+          reportSyncProgress("login");
           pageContext = await loginWithOcr(page, config, recognizeCaptcha);
           authenticated = true;
+          reportSyncProgress("fetching");
           stage = "dismiss_password_reminder";
           pageContext = await dismissPasswordReminder(page);
           data = await fetchTaishinBankData(
