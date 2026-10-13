@@ -237,15 +237,6 @@ describe("台新信用卡金融數字與資料完整性", () => {
       },
       {
         unbilled: {
-          ...unbilled,
-          value: {
-            ...unbilled.value,
-            showRB0712_SUBTOTAL: "(CRXTIKE004)無消費資料",
-          },
-        },
-      },
-      {
-        unbilled: {
           error: null,
           value: { unpostedTx: { "001TWD": { ErrMsg: "無法取得資料" } } },
         },
@@ -254,19 +245,48 @@ describe("台新信用卡金融數字與資料完整性", () => {
       expect(() =>
         parseTaishinCreditCardData({ ...base, ...changed }),
       ).toThrow();
-    expect(
+    expect(() =>
       parseTaishinCreditCardData({
         ...base,
-        realtime: { error: "(CRXTIKE004)無消費資料" },
         unbilled: {
-          error: null,
+          ...unbilled,
           value: {
+            ...unbilled.value,
             showRB0712_SUBTOTAL: "(CRXTIKE004)無消費資料",
-            unpostedTx: { "001TWD": { ErrMsg: "(CRXTIKE004)無消費資料" } },
           },
         },
-      }).bankTransactions,
-    ).toEqual([]);
+      }),
+    ).toThrow("缺少新臺幣總額");
+    const noConsumption = parseTaishinCreditCardData({
+      ...base,
+      bills: [{ ...bill, value: { ...bill.value, newAcctDetailList: [] } }],
+      overview: {
+        error: null,
+        value: {
+          carInfoList: {
+            "001": {
+              BillYear: "2026",
+              BillMon: "10",
+              StmtBalance: "1000",
+              LstPymtAmt: "400",
+            },
+          },
+        },
+      },
+      realtime: { error: "(CRXTIKE004)無消費資料" },
+      unbilled: {
+        error: null,
+        value: {
+          showRB0712_SUBTOTAL: "(CRXTIKE004)無消費資料",
+          unpostedTx: { "001TWD": { ErrMsg: "(CRXTIKE004)無消費資料" } },
+        },
+      },
+    });
+    expect(noConsumption.bankTransactions).toEqual([]);
+    expect(noConsumption.bankBalanceSnapshots[0]).toMatchObject({
+      balance: -600,
+      raw: { unbilledAmount: 0 },
+    });
     expect(
       parseTaishinCreditCardData({ ...base, hasCreditCard: false })
         .bankAccounts,
