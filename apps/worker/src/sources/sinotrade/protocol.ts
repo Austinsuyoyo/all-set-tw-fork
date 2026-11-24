@@ -463,7 +463,9 @@ export function parseTaiwanStatementResponse(
     const rawSide = stringField(row, "bs");
     if (rawSide !== "B" && rawSide !== "S") protocolError();
     const side: "B" | "S" = rawSide === "B" ? "B" : "S";
-    if (stringField(row, "ttype") !== "1") protocolError();
+    // ttype 1 是一般現股；Z 是零股／盤後定價等同現股交割的交易，官方合計也含這些列。
+    const tradeType = stringField(row, "ttype");
+    if (tradeType !== "1" && tradeType !== "Z") protocolError();
     if (stringField(row, "currency").trim() !== "TWD") protocolError();
     const quantity = numberField(row, "qty");
     const price = numberField(row, "price");

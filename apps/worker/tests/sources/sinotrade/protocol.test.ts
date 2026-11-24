@@ -440,6 +440,42 @@ describe("Sinotrade 交易紀錄解析", () => {
     ).toEqual([]);
   });
 
+  it("台股對帳單：零股／盤後定價（ttype Z）視為現股交易", () => {
+    const zSell = statementRow({
+      tdate: "20230130",
+      ord_no: "Z0001",
+      bs: "S",
+      stock: "5347",
+      name_zh: "世界",
+      ttype: "Z",
+      qty: 136,
+      price: 98,
+      amt: 13328,
+      fee: 57,
+      tax: 0,
+      payable: 0,
+      receivable: 13271,
+      net: 13271,
+    });
+    expect(parseTaiwanStatementResponse(statement([zSell]))).toEqual([
+      {
+        key: "2023-01-30:Z0001:S:5347:136:98",
+        symbol: "5347",
+        name: "世界",
+        tradeDate: "2023-01-30",
+        side: "S",
+        quantity: 136,
+        price: 98,
+        amount: 13271,
+        currency: "TWD",
+        market: "TW",
+        fee: 57,
+        tax: 0,
+        orderNo: "Z0001",
+      },
+    ]);
+  });
+
   it("台股對帳單：總計不符、未知交易別、買賣欄位矛盾或日期不合法時不寫入", () => {
     const bad: unknown[] = [
       { success: "False", result: {} },

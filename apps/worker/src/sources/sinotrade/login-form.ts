@@ -527,7 +527,7 @@ export function describeSinotradeLoginForm(
     const labels = members.map((member) => cleanLabel(member.label));
     if (
       result.inputs.otpChannel ||
-      members.length < 2 ||
+      members.length === 0 ||
       !labels.every((label) => CHANNEL_LABEL.test(label))
     )
       return result;

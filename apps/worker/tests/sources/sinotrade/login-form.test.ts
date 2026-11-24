@@ -398,6 +398,30 @@ describe("證券原生欄位與驗證授權", () => {
     ).toMatchObject({ step: "certificate", actions: ["confirm_certificate"] });
   });
 
+  it("官方只提供手機收取 OTP 時仍可送出，不因 Email 選項停用而卡住", () => {
+    const phoneOnly = describeSinotradeLoginForm({
+      ...channelForm,
+      inputs: [radio(0, "手機")],
+      buttons: [{ index: 0, label: "取得驗證碼" }],
+    });
+    expect(phoneOnly.challenge).toMatchObject({
+      step: "otp",
+      fields: [
+        {
+          key: "otpChannel",
+          action: "request_otp",
+          type: "choice",
+          options: [{ value: "0", label: "手機" }],
+        },
+      ],
+      actions: ["request_otp"],
+    });
+    expect(phoneOnly.buttons.request_otp).toEqual({
+      index: 0,
+      label: "取得驗證碼",
+    });
+  });
+
   it("日期格式不明、未知欄位、含糊按鈕或 reCAPTCHA 時不猜測、不提供提交動作", () => {
     const forms: SinotradeLoginForm[] = [
       {
